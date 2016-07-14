@@ -1,0 +1,79 @@
+README for PCGACScode
+
+PCGACScode includes matlab .m files for generating and processing data.  It is set-up for the data from the paper "Performance Comparisons of Greedy Algorithms for Compressed Sensing", J.D. Blanchard & J. Tanner.  However, it is straightforward to alter the code for other algorithms.  The parent directory is PCGACScode.
+
+PCGACScode/:
+
+Functions:
+do_all.m
+  - this script is a single command to generate and process all data and then accompanying plots.
+get_data_file_names.m
+  - this function gets the names of the files containing the data with the option to restrict the search to a date range.  Used by functions in multiple subdirectories
+tests_delta_fixed.m
+  - this function performs the binary search and transition region tests for determining the phase transition
+ 
+Directories:
+code
+  - this folder is for all matrix ensembles and sparse binary vectors, i.e. problem classes (Mat,B)
+code_noise
+  - this folder is for all matrix ensembles and all vector ensembles with and without noise, i.e. problem classes (mat,vec)
+code_table
+  - this folder generates and process the data and then creates .tex files containing tables
+shared
+  - this folder contains m-files that are shared by functions in the three other directories
+
+Other contents:
+README (this file)
+exclude
+  - this file is used to tar the only the .m files and subdirectories via the command "tar -cvf fname.tar -X PCGACScode/exclude PCGACScode/" when employed form the directory on level up from PCGACScode/.
+
+
+
+PCGACScode/code/:
+
+Subdirectories:
+plots/
+
+Functions:
+
+generate_data_timings.m
+  shared/tests_delta_fixed.m
+
+-this can be used as a script with no arguments, or can take the algorithm list only, or can take the algorithm list and ensemble list.  It generates the data on a fixed grid in the recovery region.  There are several options that are easily changed at the beginning of the file.
+
+generate_data_transitions.m
+  shared/tests_delta_fixed.m
+
+-this can be used as a script with no arguments, or can take the algorithm list only, or can take the algorithm list and ensemble list.  It generates the data near the phase transition region in order to identify the recovery phase transition curve.  There are several options that are easily changed at the beginning of the file.
+
+process_all_data.m
+  process_dct_data.m
+    shared/get_data_file_names.m
+  process_smv_data.m
+    shared/get_data_file_names.m
+  process_gen_data.m
+    shared/get_data_file_names.m
+  add_logit_data_all.m
+    add_logit_data.m
+      shared/calc_logit.m
+      shared/logit_model_error.m
+        shared/logit_model.m
+
+- All options to process data are made on the process_all_data.m file.  It can be run as a script with no arguments, take only the algorithm list, or take both an algorithm and matrix ensemble list.  The functions called by process_all_data.m never need to be called directly.
+
+  
+make_all_plots.m
+  make_transition_plots.m
+  make_joint_algorithm_plots.m
+  make_all_best_alg_plots.m
+    make_best_alg_plot.m
+      make_delta_rho_plot.m
+
+- All options for generating plots are available to change on make_all_plots.m.  The other functions do not need to be altered in any way.  The only exception is that make_all_best_alg_plots.m only permits 6 algorithms for comparison.  More algorithms would require an expansion of this code.
+
+make_error_separation_plot.m
+
+
+
+
+

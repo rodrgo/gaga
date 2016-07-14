@@ -1,0 +1,29 @@
+README for CGIHTcode
+
+CGIHTcode includes matlab .m files for generating and processing data.  It is set-up for the data from the papers "CGIHT: Conjugate gradient iterative hard thresholding for compressed sensing and matrix completion", J.D. Blanchard, J. Tanner, and K. Wei, and "Conjugate Gradient Hard Thresholding: Observed noise stability in compressed sensing", J.D. Blanchard, J. Tanner, and K. Wei.  However, it is straightforward to alter the code for other algorithms.  The parent directory is CGIHTcode.  All functions are set by default to generate only a portion of the data for a much smaller problem size of n=2^10.  The scripts are easily altered to generate the full data with comments in the scripts providing directions.
+
+CGIHTcode/:
+
+Functions:
+do_all.m
+  - this script is a single command to generate and process all data and then accompanying plots.
+ 
+Directories:
+code
+  - this folder is for all matrix ensembles and sparse binary vectors, i.e. problem classes (Mat,B)
+code_noise
+  - this folder is for all matrix ensembles and all vector ensembles with and without noise, i.e. problem classes (Mat,vec)
+shared
+  - this folder contains m-files that are shared by functions in the three other directories
+
+Other contents:
+README (this file)
+exclude
+  - this file is used to tar the only the .m files and subdirectories via the command "tar -cvf fname.tar -X PCGACScode/exclude PCGACScode/" when employed form the directory on level up from PCGACScode/.
+
+
+
+
+
+
+

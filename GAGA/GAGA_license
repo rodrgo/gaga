@@ -1,0 +1,32 @@
+GAGA License
+
+In  order to use the GAGA library, or any of its constituent parts, a user must agree to abide by a set of conditions of use. The library is available at no cost for ``Internal'' use. ``Internal'' use of the library is defined to be use of the library by a person or institution for academic, educational, or research purposes under the following conditions. Any use of the library implies that these conditions have been understood, and that the user agrees to abide by all the listed conditions.
+
+1. The copyright of the GAGA library, its constituent packages and documentation, and the function names gaga_cs, gaga_dct, gaga_smv, gaga_gen, gaga_matlab_cs, gaga_matlab_dct, gaga_matlab_smv, and gaga_matlab_gen are protected by this license and my not be reused.
+
+2. The library, or any modification thereof, may not be sold or supplied, nor embedded withing other software products which are subsequently sold or supplied, to a third party.
+
+3.  The library comes with no guarantee, expressed or implied, that it is suitable for any specific purpose nor that it is free of error.  It should not be relied on as the basis to solve a problem whose incorrect solution could result in injury to person or property.  If the library or any of its constituent parts is employed in such a manner, it is at the users' own risk and the authors disclaim all liability for such use.
+
+4.  The library is distributed as is.  In particular, no maintenance, support, troubleshooting, or subsequent upgrade is implied.
+
+5.  The use of GAGA or its constituent packages must be acknowledged, in any publication which contains results obtained with the library or any of its parts.  A citation to the paper
+                            J. D. Blanchard and J. Tanner, GPU Accelerated Greedy Algorithms for Compressed Sensing,
+                            Mathematical Programming Computation, 5(3): 267-304, 2013
+is suitable.
+
+6.  Users of the library are encouraged to submit examples of problems they have solved or algorithms they have added to info@gaga4cs.org.  These examples or algorithms may subsequently be included in GAGA without compensation to the user.
+
+7. It is the responsibility of the licensee to ensure that each user of the library is aware of, and agrees to abide by, all the conditions in this License.
+
+A commercial license and conditions for commercial or non-academic use of the GAGA library or any of its constituent parts must be negotiated separately with 
+                            Jeffrey Blanchard
+                            GAGA for CS
+                            Grinnell College
+                            Grinnell, IA 50112, USA
+                            Phone: +1 (641) 269 - 3304
+                            Fax: +1 (641) 269 - 4984
+                            email: commercial@gaga4cs.org
+to whom all commercial inquiries should be addressed.
+
+

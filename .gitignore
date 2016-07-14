@@ -1,0 +1,24 @@
+# Phase Transition data
+*.txt
+*.mat
+
+# Figures
+*.pdf
+*.eps
+*.jpg
+
+# Other
+*.swp
+.dropbox
+.dropbox.attr
+*.mex
+*.mexglx
+*.mexw32
+*.mexa64
+*.log
+*.tar.gz
+*.tar
+*.zip
+
+# Thrust
+GAGA/thrust/*

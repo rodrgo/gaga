@@ -96,6 +96,8 @@ using namespace std;
 #include "expander/parallel_lddsr.cu"
 #include "expander/serial_l0.cu"
 #include "expander/parallel_l0_swipe.cu"
+#include "expander/robust_l0.cu"
+#include "expander/deterministic_robust_l0.cu"
 
 
 #include "algorithms.cu"

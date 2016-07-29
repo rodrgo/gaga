@@ -16,6 +16,7 @@ MEXEXT        = $(MATLAB)/bin/mexext
 # nvmex is a modified mex script that knows how to handle CUDA .cu files.
 NVMEX = $(GAGA)/CudaMATLAB/nvmex
 NVOPTS = $(GAGA)/CudaMATLAB/nvopts.sh
+#NVOPTS = $(GAGA)/CudaMATLAB/nvopts_gcc-4.9.sh
 
 # List the mex files to be built.  The .mex extension will be replaced with the
 # appropriate extension for this installation of MATLAB, e.g. .mexglx or

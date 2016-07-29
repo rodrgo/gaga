@@ -56,7 +56,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     int alg;
 
 // check if the algorithms is CCS
-    int ccs_flag = ((strcmp(algstr, "smp") == 0) || (strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "parallel_lddsr") == 0) || (strcmp(algstr, "parallel_l0") == 0) || (strcmp(algstr, "serial_l0") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0) || (strcmp(algstr, "parallel_l0_swipe") == 0)) ? 1 : 0;
+    int ccs_flag = ((strcmp(algstr, "smp") == 0) || (strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "parallel_lddsr") == 0) || (strcmp(algstr, "parallel_l0") == 0) || (strcmp(algstr, "serial_l0") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0) || (strcmp(algstr, "parallel_l0_swipe") == 0) || (strcmp(algstr, "robust_l0") == 0) || (strcmp(algstr, "deterministic_robust_l0") == 0)) ? 1 : 0;
     int ccs_indexed_matrix_flag = ((strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0)) ? 1 : 0;
     int serial_ccs_flag = strcmp(algstr, "serial_l0") == 0 ? 1 : 0;
 
@@ -83,7 +83,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     cudaDeviceProp dp;
     
     if (valid_alg == 0){
-      printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n smp\n ssmp\n er\n parallel_lddsr\n parallel_l0\n serial_l0\nFive or eight output arguments only possible if algorithms is CCS.");
+      printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n smp\n ssmp\n er\n parallel_lddsr\n parallel_l0\n serial_l0\n robust_l0\n deterministic_robust_l0\nFive or eight output arguments only possible if algorithms is CCS.");
     }
     else {
 
@@ -798,6 +798,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     else if (strcmp(algstr, "er_naive")==0) alg = 16;
     else if (strcmp(algstr, "ssmp_naive")==0) alg = 17;
     else if (strcmp(algstr, "parallel_l0_swipe")==0) alg = 18;
+    else if (strcmp(algstr, "robust_l0")==0) alg = 19;
+    else if (strcmp(algstr, "deterministic_robust_l0")==0) alg = 19;
 
 
       switch (alg) {
@@ -914,6 +916,14 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 	case 18:
 		parallel_l0_swipe(d_vec, d_y, resid, d_rows, d_cols, d_vals, tol, maxiter, k, m, n, p, nz, resRecord, timeRecord, &iter, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm);
 		SAFEcuda("PARALLEL_L0_SWIPE_S_smv in gaga_smv");
+		break;
+	case 19:
+		robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, resRecord, timeRecord, &iter, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+		SAFEcuda("ROBUST_L0_S_smv in gaga_smv");
+		break;
+	case 20:
+		deterministic_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, resRecord, timeRecord, &iter, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+		SAFEcuda("DETERMINISTIC_ROBUST_L0_S_smv in gaga_smv");
 		break;
 	default:
 		printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n CGIHT\n");

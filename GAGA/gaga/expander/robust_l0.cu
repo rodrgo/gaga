@@ -6,7 +6,7 @@
 **************************************************
 */
 
-inline void robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, const int alpha, const int nz, float *resRecord, float *timeRecord, int *p_iter, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
+inline void robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, const int alpha, const int nz, float noise_level, float *resRecord, float *timeRecord, int *p_iter, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
 
 	int iter = *p_iter;
 	int offset = 0;
@@ -17,7 +17,7 @@ inline void robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *
 	int do_hard_thresholding = 1; // Might be redundant after changes
 	int seed = 1111;
 
-	float h_sigma_noise = 1.0;
+	float h_sigma_noise = noise_level;
 	float h_sigma_s = 1.0;
 
 	// Thresholding variables
@@ -48,6 +48,7 @@ inline void robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *
 
 	float *resCycling;
 	int resCyclingLength = 2*d;
+	int resRepeatLength = d - 1;
 	resCycling = (float*) malloc(sizeof(float)*resCyclingLength);
 	for (int i = 0; i < resCyclingLength; i++)
 		resCycling[i] = 0.0;
@@ -96,7 +97,10 @@ inline void robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *
 	float *d_average_updates;
 	cudaMalloc((void**)&d_average_updates, n*sizeof(float));
 
-	while( (iter < maxiter) & (norm_res > tol) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0)){
+	float norm_res_mean = (h_sigma_noise*h_sigma_noise)*((float) m);
+	float norm_res_sd = (h_sigma_noise*h_sigma_noise)*sqrtf(2 * ((float) m)); 
+
+	while( (iter < maxiter) & (norm_res*norm_res - norm_res_mean > tol*norm_res_sd) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0)){
 
 		// time variables
 		cudaEvent_t start, stop;
@@ -175,6 +179,12 @@ inline void robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *
 			for (int i = 3; i < resCyclingLength; i = i + 2)
 				isCycling = isCycling*(resCycling[i] == resCycling[i - 2]);
 		}
+		if (iter > resRepeatLength){
+			isCycling = 1;
+			for (int i = resCyclingLength - 1; i >= resCyclingLength - resRepeatLength; i = i - 1)
+				isCycling = isCycling*(abs(resCycling[i] - resCycling[i-1]) <= 1e-10);
+
+		}
 
 		// end timing
 		cudaThreadSynchronize();
@@ -190,6 +200,17 @@ inline void robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *
 
 		//printf("iter = %d, norm_res = %5.6f, isCycling = %d\n", iter, norm_res, isCycling);
 
+	}
+
+	float norm_xhat = 0.0;
+	float big_float = 10000.0;
+	
+	norm_xhat = cublasSnrm2(n, d_vec, 1);
+
+	// If norm_xhat == 0.0, then no updates were performed.
+	// We increase the norm so that GAGA doesn't think it is a success (when n is large)
+	if (norm_xhat == 0.0){
+		cudaMemcpy(d_vec, &big_float, sizeof(float), cudaMemcpyHostToDevice);
 	}
 
 	*p_iter = iter;

@@ -1,0 +1,20 @@
+Some challenges in implementing this code:
+
++ TOL is fed into GAGA for the algorithm's stopping condition (on the norm of the residual)
+	A different TOL must be used to check success $\|x - xhat\|/\|x\|$
+
++ To check success we check that $\|x - xhat\|_1$ is not too far away from $\|\eta\|_1$ 
+
++ $\|eta\|_1 = \sum_i |\eta_i|$ and since $\eta_i \sim N(0, \sigma^2)$, then 
+$|\eta_i|$ is distributed as a half-normal.
+
+E[|\eta_i|] = \sigma*\sqrt{2/\pi}
+Var[|\eta_i|] = \sigma^2*(1 - 2/\pi)
+
++ Our stopping condition is abs(res_norm - res_norm_mean) > TOL*res_norm_sd
+	so TOL measures how many standard deviations from the mean we are aiming to have
+
++ createProblem_smv_noise first generated
+	y = A*x
+	and then adds a noise vector $\eta$ that is scaled such that $\|\eta\| = \sigma*\|y\|$.
+

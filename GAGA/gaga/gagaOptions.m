@@ -70,7 +70,7 @@ function y = gagaOptions(varargin)
         %tmp=int32(varargin{2+(j-1)*2});
         %if abs(double(tmp)-varargin{2+(j-1)*2})==0
         %  y{j,2}=tmp;
-        if ( strcmp(y{j,1}, 'l0_thresh')==1 || strcmp(y{j,1}, 'num_band_levels')==1 || strcmp(y{j,1},'maxiter')==1 || strcmp(y{j,1},'gpuNumber')==1 || strcmp(y{j,1},'supportFlag')==1 || strcmp(y{j,1},'convRateNum')==1 || strcmp(y{j,1},'numBins')==1 )
+        if ( strcmp(y{j,1}, 'debug_mode')==1 || strcmp(y{j,1}, 'l0_thresh')==1 || strcmp(y{j,1}, 'num_band_levels')==1 || strcmp(y{j,1},'maxiter')==1 || strcmp(y{j,1},'gpuNumber')==1 || strcmp(y{j,1},'supportFlag')==1 || strcmp(y{j,1},'convRateNum')==1 || strcmp(y{j,1},'numBins')==1 )
           y{j,2}=int32(varargin{2+(j-1)*2});
         elseif ( strcmp(y{j,1},'threadsPerBlockn')==1 || strcmp(y{j,1},'threadsPerBlockm')==1 || strcmp(y{j,1},'threadsPerBlocknp')==1 || strcmp(y{j,1},'threadsPerBlockBin')==1 )
           y{j,2}=int32(varargin{2+(j-1)*2});

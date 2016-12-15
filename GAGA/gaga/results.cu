@@ -347,7 +347,7 @@ inline void results_smv(float *d_vec, float *d_vec_input, int vecDistribution, f
 	printf("WARNING: Output file did not open!\n");
   }
   else {
-	File_output_smv(foutput, k, m, n, vecDistribution, h_norms, h_times, iter, convRate, checkSupport, seed, algstr, p, matrixEnsemble, band_percentage);
+	File_output_smv(foutput, k, m, n, vecDistribution, h_norms, h_times, iter, convRate, checkSupport, seed, algstr, p, matrixEnsemble, band_percentage, 0.0);
   }
   fclose(foutput);
 
@@ -861,7 +861,7 @@ inline void results_smv_noise(float *d_vec, float *d_vec_input, int vecDistribut
 	printf("WARNING: Output file did not open!\n");
   }
   else {
-	File_output_smv(foutput, k, m, n, vecDistribution, h_norms, h_times, iter, convRate, checkSupport, seed, algstr, p, matrixEnsemble, band_percentage);
+	File_output_smv(foutput, k, m, n, vecDistribution, h_norms, h_times, iter, convRate, checkSupport, seed, algstr, p, matrixEnsemble, band_percentage, noise_level);
   }
   fclose(foutput);
 

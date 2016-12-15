@@ -12,8 +12,8 @@ ens_list{1}='smv';
 delta = 0.5;
 rho = 0.03;
 
-noise_level = 1.0;
-tolerance = 1e-5;
+noise_level = 1e-2;
+tolerance = 1e-3;
 l0_thresh = 2;
 
 norms=zeros(length(alg_list),3);

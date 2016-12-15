@@ -45,7 +45,7 @@ void File_output(FILE* foutput, int k, int m, int n, int vecDistribution, float*
 
 
 
-void File_output_smv(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, char* algstr, int p, int matrixEnsemble, float band_percentage){
+void File_output_smv(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, char* algstr, int p, int matrixEnsemble, float band_percentage, float noise_level){
   fprintf(foutput,"%s_S_smv output: ",algstr);
   fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d nonzeros_per_column %d matrixEnsemble %d ",k,m,n,vecDistribution,p,matrixEnsemble);
   fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
@@ -53,12 +53,12 @@ void File_output_smv(FILE* foutput, int k, int m, int n, int vecDistribution, fl
   fprintf(foutput,"iterations %d ",iter);
   fprintf(foutput,"converge_rate %0.7e ", conv_rate);
   fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
-  if (abs(band_percentage) > 0){
-    fprintf(foutput,"seed %u ", seed);
-    fprintf(foutput,"band_percentage %1.2f \n", band_percentage);
-  }else{
-    fprintf(foutput,"seed %u \n", seed);
-  }
+  fprintf(foutput,"seed %u ", seed);
+
+  // parallel-L0 and robust-L0 numerical experiments require to have this additional output 
+  fprintf(foutput,"band_percentage %1.2f ", band_percentage);
+  fprintf(foutput,"noise_level %2.4f ", noise_level);
+  fprintf(foutput,"\n");
 }
 
 

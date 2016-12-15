@@ -6,7 +6,7 @@
 **************************************************
 */
 
-inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, const int alpha, const int nz, float *resRecord, float *timeRecord, int *p_iter, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
+inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, const int alpha, const int nz, float noise_level, float *resRecord, float *timeRecord, int *p_iter, int debug_mode, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
 
 	int iter = *p_iter;
 	int offset = 0;
@@ -14,9 +14,9 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 
 	// Options/Inputs in robust_l0
 	int enforce_l1_decrease = 0;
-	int do_hard_thresholding = 1; // Might be redundant after changes
+	int do_hard_thresholding = 1; // We always do hard thresholding
 
-	float h_sigma_noise = 1.0;
+	float h_sigma_noise = noise_level;
 	float h_sigma_s = 1.0;
 
 	// Thresholding variables
@@ -39,16 +39,16 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	
 	float norm_res;
 	float norm_res_start;
-	float norm_res_past;
 	norm_res = cublasSnrm2(m, d_res, 1);
 	norm_res_start = norm_res;
-	norm_res_past = norm_res;
 	resRecord[0] = norm_res;
+
 
 	int isCycling = 0;
 
 	float *resCycling;
 	int resCyclingLength = 2*d;
+	int resRepeatLength = d - 1;
 	resCycling = (float*) malloc(sizeof(float)*resCyclingLength);
 	for (int i = 0; i < resCyclingLength; i++)
 		resCycling[i] = 0.0;
@@ -78,6 +78,8 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	cudaMemcpyToSymbol(sigma_signal_zero, &h_sigma_signal_zero, sizeof(float));
 	cudaMemcpyToSymbol(sigma_signal_equal, &h_sigma_signal_equal, sizeof(float));
 
+	// Vector or random variables and scores
+
 	float *d_pz_u;
 	int *d_scores;
 
@@ -87,9 +89,28 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	float *d_average_updates;
 	cudaMalloc((void**)&d_average_updates, n*sizeof(float));
 
-	float prob_thresh = 0.95;
+	float prob_thresh = 0.99;
 
-	while( (iter < maxiter) & (norm_res > tol) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0) & (prob_thresh > 0.05)){
+	float norm_res_mean = (h_sigma_noise*h_sigma_noise)*((float) m);
+	float norm_res_sd = (h_sigma_noise*h_sigma_noise)*sqrtf(2 * ((float) m)); 
+
+	// Create tmp vectors for residual and signal
+
+	float * d_vec_tmp;
+	float * d_res_tmp;
+
+	cudaMalloc((void**)&d_vec_tmp, n*sizeof(float));
+	cudaMalloc((void**)&d_res_tmp, m*sizeof(float));
+
+	cudaMemcpy(d_vec_tmp, d_vec, sizeof(float)*n, cudaMemcpyDeviceToDevice);
+	cudaMemcpy(d_res_tmp, d_res, sizeof(float)*m, cudaMemcpyDeviceToDevice);
+
+	float norm_res_tmp;
+	norm_res_tmp = norm_res;
+
+	int num_failed_attempts = 0;
+
+	while( (iter < maxiter) & (norm_res*norm_res - norm_res_mean > tol*norm_res_sd) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0) & (prob_thresh > 0.05) & (num_failed_attempts < d - 1)){
 
 		// time variables
 		cudaEvent_t start, stop;
@@ -104,69 +125,85 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 		// compute l0-scores in parallel
 		// d_unif has "n" chunks of size "2*d + 1"
 		zero_vector_float<<<numBlocks, threadsPerBlock>>>(d_average_updates, n);
+		cudaThreadSynchronize();
 
 		// Takes "1" uniform random variable.
-		cuda_deterministic_prob_zero_u<<<numBlocks, threadsPerBlock>>>(d_pz_u, d, n, d_res, d_rows, offset);
+		cuda_deterministic_prob_zero_u<<<numBlocks, threadsPerBlock>>>(d_pz_u, d, n, d_res_tmp, d_rows, offset);
 		cudaThreadSynchronize();
 
 		// Compute scores
-		cuda_compute_scores_det_robust_l0<<<numBlocks, threadsPerBlock>>>(d_scores, d_pz_u, d_average_updates, d, n, d_res, d_rows, offset, prob_thresh);
+		cuda_compute_scores_det_robust_l0<<<numBlocks, threadsPerBlock>>>(d_scores, d_pz_u, d_average_updates, d, n, d_res_tmp, d_rows, offset, prob_thresh);
 		cudaThreadSynchronize();
 
 		// Compute update signal robust l0
-		cuda_update_signal_det_robust_l0<<<numBlocks, threadsPerBlock>>>(d_res, d_vec, d_updates, d_average_updates, d_rows, n, d, alpha, d_scores, enforce_l1_decrease); 
+		cuda_update_signal_det_robust_l0<<<numBlocks, threadsPerBlock>>>(d_res_tmp, d_vec_tmp, d_updates, d_average_updates, d_rows, n, d, alpha, d_scores, enforce_l1_decrease); 
 		cudaThreadSynchronize();
 
 		// compute residual
-		computeResidual(d_res, d_y, d_Ax, d_vec, d_rows, d_cols, d_vals, nz, m, n,
+		computeResidual(d_res_tmp, d_y, d_Ax, d_vec_tmp, d_rows, d_cols, d_vals, nz, m, n,
 			 numBlocksm, threadsPerBlockm, numBlocksnp, threadsPerBlocknp);
 		cudaThreadSynchronize();
 
-		//cuda_update_residual<<<numBlocks, threadsPerBlock>>>(d_res, d_rows, d_average_updates, n, d);
-
-		//cuda_update_residual_np<<<numBlocksnp, threadsPerBlocknp>>>(d_res, d_rows, d_updates, n, d);
+		// hard-thresholding
 
 		if (do_hard_thresholding == 1){
-			// thresholding
-			H_k(d_vec, k, n, d_bin, d_bin_counters, h_bin_counters, &maxChange, &max_value,
+			H_k(d_vec_tmp, k, n, d_bin, d_bin_counters, h_bin_counters, &maxChange, &max_value,
 				&slope, &minVal, &alpha_ht, &MaxBin, &k_bin, p_sum, num_bins,
 				numBlocks, threadsPerBlock, numBlocks_bin, threadsPerBlock_bin);
 
 			// recompute residual
-			computeResidual(d_res, d_y, d_Ax, d_vec, d_rows, d_cols, d_vals, nz, m, n, 
+			computeResidual(d_res_tmp, d_y, d_Ax, d_vec_tmp, d_rows, d_cols, d_vals, nz, m, n, 
 				numBlocksm, threadsPerBlockm, numBlocksnp, threadsPerBlocknp);
 		}
 
-		norm_res = cublasSnrm2(m, d_res, 1);
+		norm_res_tmp = cublasSnrm2(m, d_res_tmp, 1);
 
 		// END STEP
 
-		if (norm_res < 0.99*norm_res_past){
-			prob_thresh -= 0.1;
-		}
-		norm_res_past = norm_res;
+		if (norm_res_tmp < 0.99*norm_res){
+			// continue
 
-		// check for no change in residual 
-		for (int i = 0; i < residNorm_length - 1; i++){
-			residNorm_prev[i] = residNorm_prev[i + 1];
-		}
-		residNorm_prev[residNorm_length - 1] = norm_res;
-		for (int i = 0; i < residNorm_length - 1; i++){
-			residNorm_evolution[i] = residNorm_evolution[i + 1];
-		}
-		residNorm_evolution[residNorm_length - 1] = residNorm_prev[residNorm_length - 2] - residNorm_prev[residNorm_length - 1];
-		residNorm_diff = max_list(residNorm_evolution, residNorm_length);
+			cudaMemcpy(d_vec, d_vec_tmp, sizeof(float)*n, cudaMemcpyDeviceToDevice);
+			cudaMemcpy(d_res, d_res_tmp, sizeof(float)*m, cudaMemcpyDeviceToDevice);
+			norm_res = norm_res_tmp;
 
+			// check for no change in residual 
+			for (int i = 0; i < residNorm_length - 1; i++){
+				residNorm_prev[i] = residNorm_prev[i + 1];
+			}
+			residNorm_prev[residNorm_length - 1] = norm_res;
+			for (int i = 0; i < residNorm_length - 1; i++){
+				residNorm_evolution[i] = residNorm_evolution[i + 1];
+			}
+			residNorm_evolution[residNorm_length - 1] = residNorm_prev[residNorm_length - 2] - residNorm_prev[residNorm_length - 1];
+			residNorm_diff = max_list(residNorm_evolution, residNorm_length);
 
-		// Check for cycling
-		// Check works, but not in all cases. Need more precise check.
-		for (int i = 0; i < resCyclingLength - 1; i++)
-			resCycling[i] = resCycling[i + 1]; 
-		resCycling[resCyclingLength - 1] = norm_res;
-		if (iter > resCyclingLength){
-			isCycling = 1;
-			for (int i = 3; i < resCyclingLength; i = i + 2)
-				isCycling = isCycling*(resCycling[i] == resCycling[i - 2]);
+			// Check for cycling
+			// Check works, but not in all cases. Need more precise check.
+			for (int i = 0; i < resCyclingLength - 1; i++)
+				resCycling[i] = resCycling[i + 1]; 
+			resCycling[resCyclingLength - 1] = norm_res;
+			if (iter > resCyclingLength){
+				isCycling = 1;
+				for (int i = 3; i < resCyclingLength; i = i + 2)
+					isCycling = isCycling*(resCycling[i] == resCycling[i - 2]);
+			}
+			if (iter > resRepeatLength){
+				isCycling = 1;
+				for (int i = resCyclingLength - 1; i >= resCyclingLength - resRepeatLength; i = i - 1)
+					isCycling = isCycling*(abs(resCycling[i] - resCycling[i-1]) <= 1e-10);
+
+			}
+
+			num_failed_attempts = 0;
+
+		}else{
+
+			cudaMemcpy(d_vec_tmp, d_vec, sizeof(float)*n, cudaMemcpyDeviceToDevice);
+			cudaMemcpy(d_res_tmp, d_res, sizeof(float)*m, cudaMemcpyDeviceToDevice);
+
+			prob_thresh -= 0.05;
+			num_failed_attempts += 1;
 		}
 
 		// end timing
@@ -181,9 +218,24 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 		resRecord[iter] = norm_res;
 		timeRecord[iter] = timeRecord[iter - 1] + time;
 
-		//printf("iter = %d, norm_res = %5.6f, isCycling = %d\n", iter, norm_res, isCycling);
+		if(debug_mode == 1){
+			printf("iter = %d, norm_res = %5.10f, prob_thresh = %1.2f, isCycling = %d\n", iter, norm_res, prob_thresh, isCycling);
+		}
+
 
 	}
+
+	float norm_xhat = 0.0;
+	float big_float = 10000.0;
+	
+	norm_xhat = cublasSnrm2(n, d_vec, 1);
+
+	// If norm_xhat == 0.0, then no updates were performed.
+	// We increase the norm so that GAGA doesn't think it is a success (when n is large)
+	if (norm_xhat == 0.0){
+		cudaMemcpy(d_vec, &big_float, sizeof(float), cudaMemcpyHostToDevice);
+	}
+	
 
 	*p_iter = iter;
 
@@ -200,6 +252,10 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	cudaFree(d_average_updates);
 	cudaFree(d_pz_u);
 	cudaFree(d_scores);
+
+	// tmp vectors
+	cudaFree(d_vec_tmp);
+	cudaFree(d_res_tmp);
 
 }
 

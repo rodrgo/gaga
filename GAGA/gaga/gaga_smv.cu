@@ -34,7 +34,6 @@
 */
 
 
-
 // Host function
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
@@ -56,9 +55,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     int alg;
 
 // check if the algorithms is CCS
-    int ccs_flag = ((strcmp(algstr, "smp") == 0) || (strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "parallel_lddsr") == 0) || (strcmp(algstr, "parallel_l0") == 0) || (strcmp(algstr, "serial_l0") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0) || (strcmp(algstr, "parallel_l0_swipe") == 0) || (strcmp(algstr, "robust_l0") == 0) || (strcmp(algstr, "deterministic_robust_l0") == 0)) ? 1 : 0;
-    int ccs_indexed_matrix_flag = ((strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0)) ? 1 : 0;
+    int ccs_flag = ((strcmp(algstr, "smp") == 0) || (strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "parallel_lddsr") == 0) || (strcmp(algstr, "parallel_l0") == 0) || (strcmp(algstr, "serial_l0") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0) || (strcmp(algstr, "parallel_l0_swipe") == 0) || (strcmp(algstr, "robust_l0") == 0) || (strcmp(algstr, "deterministic_robust_l0") == 0) || (strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
+
+    int ccs_indexed_matrix_flag = ((strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0) || (strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
     int serial_ccs_flag = strcmp(algstr, "serial_l0") == 0 ? 1 : 0;
+
+    int robust_ccs_flag = ( (strcmp(algstr, "robust_l0") == 0) || (strcmp(algstr, "deterministic_robust_l0") == 0) || (strcmp(algstr, "ssmp_robust") == 0) || (strcmp(algstr, "CGIHT") == 0) || (strcmp(algstr, "CGIHTprojected")) ) ? 1 : 0;
 
 // check that algstr indicates one of the valid algorithms:
 // NIHT, HTP, IHT, ThresholdSD, ThresholdCG, CSMPSP, CGIHT
@@ -211,6 +213,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     int supp_flag = 0;
     int maxiter;
     int restartFlag = 0;
+    int debug_mode = 0;
     float projFracTol = 3.0;
     if ( (strcmp(algstr, "HTP")==0) || (strcmp(algstr, "CSMPSP")==0) ) maxiter=300;
     else maxiter=5000;
@@ -318,6 +321,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 	  else if (strcmp(buf, "band_percentage")==0){
 	    float *p_num = (float*) mxGetData(cell_element_ptr);
 	    band_percentage = *p_num; }
+	  else if (strcmp(buf, "debug_mode")==0){
+	    int *p_num = (int*) mxGetData(cell_element_ptr);
+	    debug_mode = *p_num; }
 	  else if (strcmp(buf, "kFixed")==0){
 	    int buflen_tmp = (mxGetM(cell_element_ptr) * 
                               mxGetN(cell_element_ptr)) + 1;
@@ -616,7 +622,11 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 	      seed = seed +1;
    	    SAFEcuda("createProblem_smv"); }
 	  else{ //  when noise_level > 0
+        if (robust_ccs_flag == 1){
+      	    int error_flagCP = createProblem_smv_noise_ccs(&k, m, n, vecDistribution, d_vec_input, d_y, d_rows, d_cols, d_vals, p, matrixEnsemble, &seed, noise_level);
+        } else {
       	    int error_flagCP = createProblem_smv_noise(&k, m, n, vecDistribution, d_vec_input, d_y, d_rows, d_cols, d_vals, p, matrixEnsemble, &seed, noise_level);
+        }
 	    if (k != k_tmp)
 	      seed = seed +1;
  	    SAFEcuda("createProblem_smv_noise"); }
@@ -799,7 +809,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     else if (strcmp(algstr, "ssmp_naive")==0) alg = 17;
     else if (strcmp(algstr, "parallel_l0_swipe")==0) alg = 18;
     else if (strcmp(algstr, "robust_l0")==0) alg = 19;
-    else if (strcmp(algstr, "deterministic_robust_l0")==0) alg = 19;
+    else if (strcmp(algstr, "deterministic_robust_l0")==0) alg = 20;
+    else if (strcmp(algstr, "ssmp_robust")==0) alg = 21;
 
 
       switch (alg) {
@@ -918,12 +929,16 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 		SAFEcuda("PARALLEL_L0_SWIPE_S_smv in gaga_smv");
 		break;
 	case 19:
-		robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, resRecord, timeRecord, &iter, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+		robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
 		SAFEcuda("ROBUST_L0_S_smv in gaga_smv");
 		break;
 	case 20:
-		deterministic_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, resRecord, timeRecord, &iter, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+		deterministic_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
 		SAFEcuda("DETERMINISTIC_ROBUST_L0_S_smv in gaga_smv");
+		break;
+	case 21:
+		ssmp_robust(d_vec, d_y, resid, resid_update, d_rows, d_cols, d_vals, d_rm_rows_index, d_rm_cols, h_max_nonzero_rows_count, d_bin, d_bin_counters, h_bin_counters, residNorm_prev, tol, maxiter, num_bins, k, m, n, p, nz, noise_level, &iter, err, &sum, &time_sum, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, numBlocksr, threadsPerBlockr, timeRecord, resRecord);
+		SAFEcuda("SSMP_ROBUST_S_smv in gaga_smv");
 		break;
 	default:
 		printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n CGIHT\n");

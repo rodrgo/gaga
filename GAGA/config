@@ -10,7 +10,7 @@ export MATLAB=/opt/matlab
 #export CUDAHOME=/usr/local/cuda
 export CUDAHOME=/usr/local/cuda-8.0
 #export CUDAHOME = /usr/local/cuda-4.2
-#export GPUARCH  = sm_30   # for example: Fermi is sm_20 and Kepler is sm_30
-export GPUARCH=sm_35 # Tesla K40 is sm_35
+export GPUARCH  = sm_30   # for example: Fermi is sm_20 and Kepler is sm_30
+#export GPUARCH=sm_35 # Tesla K40 is sm_35
 
 CUDAMATLAB=$(GAGA)/CudaMATLAB

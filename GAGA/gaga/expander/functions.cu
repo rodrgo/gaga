@@ -15,7 +15,7 @@ int transform_to_row_major_order(const int m, const int n, const int p, int *d_r
 	dim3 numBlocksm(num_blocksm);
 
 	int *d_rm_rows;
-	int np = n*p;
+	int np = ((int) n)*((int) p);
 	cudaMalloc((void**)&d_rm_rows, np * sizeof(int));
 	cudaMemcpy(d_rm_rows, d_rows, np * sizeof(int), cudaMemcpyDeviceToDevice);
 	cudaMemcpy(d_rm_cols, d_cols, np * sizeof(int), cudaMemcpyDeviceToDevice);
@@ -137,6 +137,8 @@ inline void H_k(float *d_vec, int K, int n, int *d_bin, int *d_bin_counters, int
                 threadsPerBlock_bin);
 
         ThresholdK(d_vec, d_bin, *p_k_bin, K, n, numBlocks, threadsPerBlock);
-}
 
+	//*p_sum = supportSizeGPU(d_vec, n, numBlocks, threadsPerBlock);
+
+}
 

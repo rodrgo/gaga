@@ -274,6 +274,7 @@ void  createVector(int * k_pointer, const int m, const int n, int vecDistributio
 	}
   k_bin = k_bin-1;
 
+
  // printf("Inside createVector, kbin is: %d \n", k_bin);
 
   free(h_bin_counter);
@@ -283,6 +284,19 @@ void  createVector(int * k_pointer, const int m, const int n, int vecDistributio
   SAFEcuda("threshold_one in createVector");
 
   *k_pointer = sum;
+
+  // =====================
+  // Added to fix segmentation error bug
+
+   if (kk < *k_pointer){
+
+	// when kFixed is on, would be nice to
+	// Add code to correct k_pointer here
+	// instead of iterating in gaga_smv
+
+   }
+
+  // =====================
 
   //cudaThreadSynchronize();
 

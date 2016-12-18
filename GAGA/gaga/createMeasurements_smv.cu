@@ -377,7 +377,6 @@ int createMeasurements_smv(const int m, const int n, float *d_vec_input, float *
     }
 
     cudaFree(d_nonzero_rows_index);
-    cudaFree(d_num_zero_rows);
     cudaFree(d_zero_rows_list);
     //cudaFree(d_nonzero_rows_count);
 

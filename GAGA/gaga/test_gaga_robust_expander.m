@@ -5,6 +5,7 @@ alg_list{1}= 'smp';
 alg_list{2}= 'ssmp';
 alg_list{3}= 'robust_l0';
 alg_list{4}= 'deterministic_robust_l0';
+alg_list{5}= 'adaptive_robust_l0';
 
 ens_list=cell(1,1);
 ens_list{1}='smv';

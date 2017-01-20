@@ -1,5 +1,6 @@
 
-algorithms = {'deterministic_robust_l0', 'robust_l0', 'ssmp_robust'};
+algorithms = {'adaptive_robust_l0', 'deterministic_robust_l0', 'robust_l0', 'ssmp_robust'};
+algorithms = {'adaptive_robust_l0', 'deterministic_robust_l0'};
 
 %RES_TOL = 2*1e-2; 
 RES_TOL = 1; 
@@ -72,7 +73,7 @@ fprintf('%d algorithms in data\n', length(algNames));
 % Initialise converged to 'false'
 converged = ones(size(errs2)) == 0;
 
-is_robust_l0 = ismember(algs, {'deterministic-robust-l0', 'robust-l0', 'ssmp-robust'});
+is_robust_l0 = ismember(algs, {'adaptive-robust-l0', 'deterministic-robust-l0', 'robust-l0', 'ssmp-robust'});
 
 mean_err1 = ms.*noise_levels*sqrt(2/pi);
 sd_err1 = sqrt(ms).*noise_levels*sqrt(1 - 2/pi);
@@ -153,6 +154,10 @@ for i = 1:length(unique_algCodes)
 			% Get largest rho such that probability of success is one.
 
 			r_max_ind = max(find(prob_convergence > 0.5, 1, 'last'));
+			if isempty(r_max_ind)
+				fprintf('Warning: algorithm did not converge at some parameters\n');
+				r_max_ind = 1;
+			end
 			rho_max = rhos_at_sigma(r_max_ind);
 			rho_max_time = average_time(r_max_ind);
 
@@ -289,3 +294,118 @@ for i = 1:length(unique_algCodes)
 end
 
 
+% ======================
+% Plot phase transition facet by delta
+% ======================
+
+MS = 'MarkerSize';
+max_MS = 15;
+for j = 1:length(unique_deltas)
+	delta = unique_deltas(j);
+
+	% Create figure for probabilities
+
+	hold off;
+
+	figure;
+	set(gcf, 'color', [1 1 1]);
+	set(gca, 'Fontname', 'Times', 'Fontsize', 15);
+
+	handles = [];
+	labels = {};
+
+	for i = 1:length(unique_algCodes)
+		algCode = unique_algCodes(i);
+		alg_name = algNames{i}; 
+
+		% For this value of algCode and this delta, extract a summary of
+		% time or prob_convergence
+
+		ind = pt_matrix(:, 1) == algCode & pt_matrix(:, 2) == delta;
+
+		sigmas = pt_matrix(ind, 3);
+		rhos = pt_matrix(ind, 4);
+
+		handles(end + 1) = plot(sigmas, rhos, '.-');
+		hold on;
+		labels{end + 1} = alg_name;
+
+	end
+
+	legend(handles, labels);
+	xlabel('\sigma'), ...
+	ylabel('\rho*(\delta)');
+
+	% Print title	
+
+	nExp = log2(n);
+	title(['\delta=' sprintf('delta=%1.2f with n = 2^{%d} and d = %d', delta, nExp, d)]);
+
+	hold off;
+
+	% Save figure
+
+	fig_name = ['plots/rho_vs_noise_probs_delta_' sprintf('%1.2f', delta) '.pdf'];
+
+	print('-dpdf', fig_name);
+
+end
+
+% ======================
+% Plot timing facet by delta
+% ======================
+
+MS = 'MarkerSize';
+max_MS = 15;
+
+for j = 1:length(unique_deltas)
+	delta = unique_deltas(j);
+
+	% Create figure for probabilities
+
+	hold off;
+
+	figure;
+	set(gcf, 'color', [1 1 1]);
+	set(gca, 'Fontname', 'Times', 'Fontsize', 15);
+	
+
+	handles = [];
+	labels = {};
+
+	for i = 1:length(unique_algCodes)
+		algCode = unique_algCodes(i);
+		alg_name = algNames{i}; 
+
+		% For this value of algCode and this delta, extract a summary of
+		% time or prob_convergence
+
+		ind = pt_matrix(:, 1) == algCode & pt_matrix(:, 2) == delta;
+
+		sigmas = pt_matrix(ind, 3);
+		rho_time = pt_matrix(ind, 5);
+
+		handles(end + 1) = semilogy(sigmas, rho_time, '.-');
+		hold on;
+		labels{end + 1} = alg_name;
+
+	end
+
+	legend(handles, labels);
+	xlabel('\sigma'), ...
+	ylabel('Average time (sec) at \rho*(\delta)');
+
+	% Print title	
+
+	nExp = log2(n);
+	title(['\delta=' sprintf('%1.2f with n = 2^{%d} and d = %d', delta, nExp, d)]);
+
+	hold off;
+
+	% Save figure
+
+	fig_name = ['plots/rho_vs_noise_time_delta_' sprintf('%1.2f', delta) '.pdf'];
+
+	print('-dpdf', fig_name);
+
+end

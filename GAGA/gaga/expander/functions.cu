@@ -91,6 +91,7 @@ int supportSizeGPU(float * d_vec, int n, dim3 numBlocks, dim3 threadsPerBlock){
         cudaMemcpy( dev_c, c, sizeof( int ), cudaMemcpyHostToDevice );
 
         countSupport<<< numBlocks, threadsPerBlock >>>( d_vec, n, dev_c );
+	cudaThreadSynchronize();
 
         // copy device result back to host copy of c
         cudaMemcpy( c, dev_c, sizeof( int ) , cudaMemcpyDeviceToHost );

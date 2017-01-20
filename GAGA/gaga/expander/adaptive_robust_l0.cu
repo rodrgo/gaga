@@ -1,26 +1,29 @@
 
 /*
 **************************************************
-**	deterministic-robust-l0			**
-**  Noise robust version to parallel_l0		**
+**						adaptive-robust-l0							
+**  	Noise robust version to parallel_l0	
 **************************************************
 */
 
-inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, const int alpha, const int nz, float noise_level, float *resRecord, float *timeRecord, int *p_iter, int debug_mode, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
+inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, int alpha, const int nz, float noise_level, float *resRecord, float *timeRecord, int *p_iter, int debug_mode, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
 
 	int iter = *p_iter;
 	int offset = 0;
 	timeRecord[0] = 0.0;
 
-	// Options/Inputs in robust_l0
-	int enforce_l1_decrease = 0;
-	int do_hard_thresholding = 1; // We always do hard thresholding
+	// Noise constants
 
-	float h_sigma_noise = noise_level;
-	float h_sigma_s = 1.0;
 	float h_sigma2_n = noise_level*noise_level;
+	float h_sigma2_s = 1.0;
+	float h_snr = h_sigma2_s/h_sigma2_n; // Signal-to-noise ratio
+
+	cudaMemcpyToSymbol(sigma2_n, &h_sigma2_n, sizeof(float));
+	cudaMemcpyToSymbol(sigma2_s, &h_sigma2_s, sizeof(float));
+	cudaMemcpyToSymbol(snr, &h_snr, sizeof(float));
 
 	// Thresholding variables
+
 	int k_bin = 0;
 	float alpha_ht = 0.25f;
 	int MaxBin = (int)(num_bins * (1 - alpha_ht));
@@ -29,21 +32,30 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	float max_value = MaxMagnitude(d_vec, n);
 	float slope = ((num_bins - 1)/(max_value));
 	
-	float * d_Ax;
-	//float * d_updates;
-	
-	cudaMalloc((void**)&d_Ax, m * sizeof(float));
-	//cudaMalloc((void**)&d_updates, n * sizeof(float));
+	// Other auxiliary variables
 
-	computeResidual(d_res, d_y, d_Ax, d_vec, d_rows, d_cols, d_vals, nz, m, n,
-		 numBlocksm, threadsPerBlockm, numBlocksnp, threadsPerBlocknp);
-	
+	float * d_Ax;
+	cudaMalloc((void**)&d_Ax, m * sizeof(float));
+
+	int *d_vec_ind;
+	cudaMalloc((void**)&d_vec_ind, n * sizeof(int));
+	zero_vector_int<<<numBlocks, threadsPerBlock>>>(d_vec_ind, n);
+	thrust::device_ptr<int> thrust_vec_ind(d_vec_ind);
+
+	// Residual
+	// Assume initial guess is zero
+
+	cudaMemcpy(d_res, d_y, sizeof(float)*m, cudaMemcpyDeviceToDevice);
+
 	float norm_res;
 	float norm_res_start;
 	norm_res = cublasSnrm2(m, d_res, 1);
 	norm_res_start = norm_res;
 	resRecord[0] = norm_res;
 
+	// Stopping condition variables
+
+	int stopping_debug = 0;
 
 	int isCycling = 0;
 
@@ -65,35 +77,6 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 		residNorm_evolution[i] = 1.0f;
 	}
 
-        // CUDA constants for p.d.f. construction
-	float rho = ((float)k)/((float) m);
-
-	float h_prob_zero_factor = expf(d*rho) - 1;
-	float h_prob_equal_factor = expf(2*d*rho) - 1;
-	float h_sigma_signal_zero = sqrtf(h_sigma_noise*h_sigma_noise + h_sigma_s*h_sigma_s*d*rho/(1- expf(-d*rho)));
-	float h_sigma_signal_equal = sqrtf(2*h_sigma_noise*h_sigma_noise + 2*h_sigma_s*h_sigma_s*d*rho/(1 - expf(-2*d*rho)));
-
-	cudaMemcpyToSymbol(sigma_noise, &h_sigma_noise, sizeof(float));
-	cudaMemcpyToSymbol(prob_zero_factor, &h_prob_zero_factor, sizeof(float));
-	cudaMemcpyToSymbol(prob_equal_factor, &h_prob_equal_factor, sizeof(float));
-	cudaMemcpyToSymbol(sigma_signal_zero, &h_sigma_signal_zero, sizeof(float));
-	cudaMemcpyToSymbol(sigma_signal_equal, &h_sigma_signal_equal, sizeof(float));
-
-	// Vector or random variables and scores
-
-	/*
-	float *d_pz_u;
-	int *d_scores;
-
-	cudaMalloc((void**)&d_pz_u, n*sizeof(float));
-	cudaMalloc((void**)&d_scores, n*sizeof(int));
-
-	float *d_average_updates;
-	cudaMalloc((void**)&d_average_updates, n*sizeof(float));
-	*/
-
-	float prob_thresh = 1;
-
 	// Create tmp vectors for residual and signal
 
 	float * d_vec_tmp;
@@ -108,11 +91,7 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	float norm_res_tmp;
 	norm_res_tmp = norm_res;
 
-	int num_failed_attempts = 0;
-
-	int stopping_debug = 1;
-
-	// Norm 1 statistics
+	// L1-norm stopping conditions
 
 	float norm_1_res_mean = ((float) m)*sqrtf(h_sigma2_n)*sqrtf(2/3.1415926535);
 	float norm_1_res_sd = sqrtf(((float) m)*h_sigma2_n*(1 - sqrtf(2/3.1415926535)));
@@ -120,7 +99,20 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	float norm_1_res = cublasSasum(m, d_res_tmp, 1);
 	float norm_1_res_tmp = norm_1_res;
 
-	while( (iter < maxiter) & (!(norm_1_res - norm_1_res_mean <= tol*norm_1_res_sd)) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0) & (prob_thresh > 0.05) & (num_failed_attempts < d + 1)){
+	if (debug_mode == 1){
+		printf("norm_1_res_mean = %5.6f\n", norm_1_res_mean);
+		printf("norm_1_res_sd = %5.6f\n", norm_1_res_sd);
+	}
+
+	// Other variables for adaptive-robust-l0
+
+	int num_failed_attempts = 0;
+
+	float prob_thresh = 1;
+	int xhat_k = 0;
+	int k_target = k - xhat_k;
+
+	while( (iter < maxiter) & (!(norm_1_res - norm_1_res_mean <= tol*norm_1_res_sd)) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0) & (prob_thresh > 0.05) & (num_failed_attempts < d + 1) ){
 
 		// time variables
 		cudaEvent_t start, stop;
@@ -130,55 +122,39 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 		cudaEventRecord(start, 0);
 
 		// BEGIN STEP
+
 		offset = iter % d;
 		
-		/*
-		// compute l0-scores in parallel
-		// d_unif has "n" chunks of size "2*d + 1"
-		zero_vector_float<<<numBlocks, threadsPerBlock>>>(d_average_updates, n);
-		cudaThreadSynchronize();
+		// Compute scores and update
 
-		// Takes "1" uniform random variable.
-		cuda_deterministic_prob_zero_u<<<numBlocks, threadsPerBlock>>>(d_pz_u, d, n, d_res_tmp, d_rows, offset);
-		cudaThreadSynchronize();
+		cuda_adaptive_robust_l0_score_and_update<<<numBlocks, threadsPerBlock>>>(d_vec, alpha, d, k_target, m, n, d_res, d_rows, offset, prob_thresh);
 
-		// Compute scores
-		cuda_compute_scores_det_robust_l0<<<numBlocks, threadsPerBlock>>>(d_scores, d_pz_u, d_average_updates, d, n, d_res_tmp, d_rows, offset, prob_thresh);
-		cudaThreadSynchronize();
-
-		// Compute update signal robust l0
-		cuda_update_signal_det_robust_l0<<<numBlocks, threadsPerBlock>>>(d_res_tmp, d_vec_tmp, d_updates, d_average_updates, d_rows, n, d, alpha, d_scores, enforce_l1_decrease); 
-		cudaThreadSynchronize();
-		*/
-
-		cuda_det_robust_l0_step<<<numBlocks, threadsPerBlock>>>(d_res_tmp, d_vec_tmp, d_rows, n, d, alpha, offset, prob_thresh, enforce_l1_decrease); 
-		cudaThreadSynchronize();
-
-		// compute residual
-		computeResidual(d_res_tmp, d_y, d_Ax, d_vec_tmp, d_rows, d_cols, d_vals, nz, m, n,
-			 numBlocksm, threadsPerBlockm, numBlocksnp, threadsPerBlocknp);
-		cudaThreadSynchronize();
-
-		// hard-thresholding
-
-		if (do_hard_thresholding == 1){
-			H_k(d_vec_tmp, k, n, d_bin, d_bin_counters, h_bin_counters, &maxChange, &max_value,
-				&slope, &minVal, &alpha_ht, &MaxBin, &k_bin, p_sum, num_bins,
-				numBlocks, threadsPerBlock, numBlocks_bin, threadsPerBlock_bin);
-
-			// recompute residual
-			computeResidual(d_res_tmp, d_y, d_Ax, d_vec_tmp, d_rows, d_cols, d_vals, nz, m, n, 
-				numBlocksm, threadsPerBlockm, numBlocksnp, threadsPerBlocknp);
+		if (debug_mode == 1){
+			printf("k_target=%d, prob_thresh=%1.2f, alpha=%d\n", k_target, prob_thresh, alpha);
 		}
 
-		//norm_res_tmp = cublasSnrm2(m, d_res_tmp, 1);
+		// hard-thresholding
+		// Get effective value of xhat_k
+
+		H_k(d_vec_tmp, k, n, d_bin, d_bin_counters, 
+			h_bin_counters, &maxChange, &max_value,
+			&slope, &minVal, &alpha_ht, &MaxBin,
+			&k_bin, p_sum, num_bins, numBlocks,
+			threadsPerBlock, numBlocks_bin,
+			threadsPerBlock_bin);
+
+		// recompute residual
+		computeResidual(d_res_tmp, d_y, d_Ax, d_vec_tmp,
+			d_rows, d_cols, d_vals, nz, m, n, numBlocksm,
+			threadsPerBlockm, numBlocksnp, threadsPerBlocknp);
+		cudaThreadSynchronize();
+
 		norm_1_res_tmp = cublasSasum(m, d_res_tmp, 1);
 
 		// END STEP
 
-		//if (norm_res_tmp < 0.99*norm_res){
+		//if (norm_1_res_tmp < 0.99*norm_1_res){
 		if (norm_1_res_tmp < norm_1_res){
-			// continue
 
 			cudaMemcpy(d_vec, d_vec_tmp, sizeof(float)*n, cudaMemcpyDeviceToDevice);
 			cudaMemcpy(d_res, d_res_tmp, sizeof(float)*m, cudaMemcpyDeviceToDevice);
@@ -186,6 +162,8 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 			norm_res_tmp = cublasSnrm2(m, d_res_tmp, 1);
 			norm_res = norm_res_tmp;
 			norm_1_res = norm_1_res_tmp;
+
+			// STOPPING CONDITIONS
 
 			// check for no change in residual 
 			for (int i = 0; i < residNorm_length - 1; i++){
@@ -212,8 +190,18 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 				isCycling = 1;
 				for (int i = resCyclingLength - 1; i >= resCyclingLength - resRepeatLength; i = i - 1)
 					isCycling = isCycling*(abs(resCycling[i] - resCycling[i-1]) <= 1e-10);
-
 			}
+
+			// END STOPPING CONDITIONS
+			// Get number of nonzeros in xhat
+
+			find_nonzeros<<<numBlocks, threadsPerBlock>>>(d_vec, d_vec_ind, n, d, k_target, m, prob_thresh);
+			cudaThreadSynchronize();
+
+			xhat_k = thrust::count(thrust_vec_ind, thrust_vec_ind+n, 1);
+			k_target = k - xhat_k;
+			if (k_target < 1)
+				k_target = 1;
 
 			num_failed_attempts = 0;
 
@@ -222,9 +210,9 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 			cudaMemcpy(d_vec_tmp, d_vec, sizeof(float)*n, cudaMemcpyDeviceToDevice);
 			cudaMemcpy(d_res_tmp, d_res, sizeof(float)*m, cudaMemcpyDeviceToDevice);
 
-			//prob_thresh -= 0.05;
-			prob_thresh -= 0.02;
 			num_failed_attempts += 1;
+			prob_thresh -= 0.02;
+
 		}
 
 		// end timing
@@ -272,7 +260,6 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 	if (norm_xhat == 0.0){
 		cudaMemcpy(d_vec, &big_float, sizeof(float), cudaMemcpyHostToDevice);
 	}
-	
 
 	*p_iter = iter;
 
@@ -282,15 +269,7 @@ inline void deterministic_robust_l0(float *d_vec, float *d_y, float *d_res, int 
 
 	// clean GPU
 	cudaFree(d_Ax);
-	//cudaFree(d_updates);
-        //cudaFree(randArray);
-        //cudaFree(d_state);
-
-	/*
-	cudaFree(d_average_updates);
-	cudaFree(d_pz_u);
-	cudaFree(d_scores);
-	*/
+	cudaFree(d_vec_ind);
 
 	// tmp vectors
 	cudaFree(d_vec_tmp);

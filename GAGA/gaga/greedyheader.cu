@@ -76,7 +76,9 @@ using namespace std;
 #include <curand.h>
 #include <mex.h>
 #include <thrust/sort.h>
+#include <thrust/count.h>
 #include <thrust/device_vector.h>
+#include <thrust/extrema.h>
 #include <thrust/generate.h>
 #include <thrust/reduce.h>
 #include <thrust/functional.h>
@@ -99,6 +101,7 @@ using namespace std;
 #include "expander/robust_l0.cu"
 #include "expander/deterministic_robust_l0.cu"
 #include "expander/ssmp_robust.cu"
+#include "expander/adaptive_robust_l0.cu"
 
 
 #include "algorithms.cu"

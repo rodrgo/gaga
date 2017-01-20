@@ -3,8 +3,8 @@ clear all;
 
 set(gca,'fontsize',14)
 
-%ns = [2^14, 2^16, 2^18];
-ns = [2^14];
+ns = [2^14, 2^16, 2^18];
+%ns = [2^14];
 nzs = [7];
 ens_list = {'smv'};
 sigmas = [1e-3, 1e-2, 1e-1];
@@ -13,7 +13,7 @@ SOL_TOL = 1;
 simplex_curve = 0;
 addpath('../data/polytope/');
 
-alg_list = {'deterministic_robust_l0'};
+alg_list = {'deterministic_robust_l0', 'adaptive_robust_l0'};
 
 for i = 1:length(alg_list)
 	dir = fullfile('../data/', alg_list{i});

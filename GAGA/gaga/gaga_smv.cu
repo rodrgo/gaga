@@ -55,17 +55,48 @@
 	    int alg;
 
 	// check if the algorithms is CCS
-	    int ccs_flag = ((strcmp(algstr, "smp") == 0) || (strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "parallel_lddsr") == 0) || (strcmp(algstr, "parallel_l0") == 0) || (strcmp(algstr, "serial_l0") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0) || (strcmp(algstr, "parallel_l0_swipe") == 0) || (strcmp(algstr, "robust_l0") == 0) || (strcmp(algstr, "deterministic_robust_l0") == 0) || (strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
+	    int ccs_flag = ((strcmp(algstr, "smp") == 0) || \
+		(strcmp(algstr, "ssmp") == 0) || \
+		(strcmp(algstr, "er") == 0) || \
+		(strcmp(algstr, "parallel_lddsr") == 0) || \
+		(strcmp(algstr, "parallel_l0") == 0) || \
+		(strcmp(algstr, "serial_l0") == 0) || \
+		(strcmp(algstr, "er_naive") == 0) || \
+		(strcmp(algstr, "ssmp_naive") == 0) || \
+		(strcmp(algstr, "parallel_l0_swipe") == 0) || \
+		(strcmp(algstr, "robust_l0") == 0) || \
+		(strcmp(algstr, "deterministic_robust_l0") == 0) || \
+		(strcmp(algstr, "adaptive_robust_l0") == 0) || \
+		(strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
 
-	    int ccs_indexed_matrix_flag = ((strcmp(algstr, "ssmp") == 0) || (strcmp(algstr, "er") == 0) || (strcmp(algstr, "er_naive") == 0) || (strcmp(algstr, "ssmp_naive") == 0) || (strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
+	    int ccs_indexed_matrix_flag = ((strcmp(algstr, "ssmp") == 0) || \
+		(strcmp(algstr, "er") == 0) || \
+		(strcmp(algstr, "er_naive") == 0) || \
+		(strcmp(algstr, "ssmp_naive") == 0) || \
+		(strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
+
 	    int serial_ccs_flag = strcmp(algstr, "serial_l0") == 0 ? 1 : 0;
 
-	    int robust_ccs_flag = ( (strcmp(algstr, "robust_l0") == 0) || (strcmp(algstr, "deterministic_robust_l0") == 0) || (strcmp(algstr, "ssmp_robust") == 0) || (strcmp(algstr, "CGIHT") == 0) || (strcmp(algstr, "CGIHTprojected")) ) ? 1 : 0;
+	    int robust_ccs_flag = ((strcmp(algstr, "robust_l0") == 0) || \
+		(strcmp(algstr, "adaptive_robust_l0") == 0) || \
+		(strcmp(algstr, "deterministic_robust_l0") == 0) || \
+		(strcmp(algstr, "ssmp_robust") == 0) || \
+		(strcmp(algstr, "CGIHT") == 0) || \
+		(strcmp(algstr, "CGIHTprojected")) ) ? 1 : 0;
 
 	// check that algstr indicates one of the valid algorithms:
 	// NIHT, HTP, IHT, ThresholdSD, ThresholdCG, CSMPSP, CGIHT
-	    int valid_alg = 0;
-	    if ( (strcmp(algstr, "NIHT")==0) || (strcmp(algstr, "HTP")==0) || (strcmp(algstr, "IHT")==0) || (strcmp(algstr, "ThresholdSD")==0) || (strcmp(algstr, "ThresholdCG")==0) || (strcmp(algstr, "CSMPSP")==0) || (strcmp(algstr, "CGIHT")==0) || (strcmp(algstr, "FIHT")==0) || (strcmp(algstr, "ALPS")==0) || (strcmp(algstr, "CGIHTprojected")==0) || (ccs_flag == 1)) valid_alg = 1;
+	    int valid_alg = ((strcmp(algstr, "NIHT")==0) || \
+		(strcmp(algstr, "HTP")==0) || \
+		(strcmp(algstr, "IHT")==0) || \
+		(strcmp(algstr, "ThresholdSD")==0) || \
+		(strcmp(algstr, "ThresholdCG")==0) || \
+		(strcmp(algstr, "CSMPSP")==0) || \
+		(strcmp(algstr, "CGIHT")==0) || \
+		(strcmp(algstr, "FIHT")==0) || \
+		(strcmp(algstr, "ALPS")==0) || \
+		(strcmp(algstr, "CGIHTprojected")==0) || \
+		(ccs_flag == 1)) ? 1 : 0;
 
 	// possible inputs
 	    int k, m, n, p;
@@ -810,6 +841,7 @@
 	    else if (strcmp(algstr, "robust_l0")==0) alg = 19;
 	    else if (strcmp(algstr, "deterministic_robust_l0")==0) alg = 20;
 	    else if (strcmp(algstr, "ssmp_robust")==0) alg = 21;
+	    else if (strcmp(algstr, "adaptive_robust_l0")==0) alg = 22;
 
 
       switch (alg) {
@@ -938,6 +970,10 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 	case 21:
 		ssmp_robust(d_vec, d_y, resid, resid_update, d_rows, d_cols, d_vals, d_rm_rows_index, d_rm_cols, h_max_nonzero_rows_count, d_bin, d_bin_counters, h_bin_counters, residNorm_prev, tol, maxiter, num_bins, k, m, n, p, nz, noise_level, &iter, err, &sum, &time_sum, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, numBlocksr, threadsPerBlockr, timeRecord, resRecord);
 		SAFEcuda("SSMP_ROBUST_S_smv in gaga_smv");
+		break;
+	case 22:
+		adaptive_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+		SAFEcuda("ADAPTIVE_ROBUST_L0_S_smv in gaga_smv");
 		break;
 	default:
 		printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n CGIHT\n");

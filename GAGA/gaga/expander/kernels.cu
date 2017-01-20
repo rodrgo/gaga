@@ -552,6 +552,7 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 				float sum_updates = 0.0;
 				int score = 0;
 				for (int i = 0; i < d; i++){
+
 					// get value
 					v = d_res[d_rows[d*tid + i]];
 
@@ -617,6 +618,224 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 			}
 		}
 	}
+
+	__global__ void cuda_det_robust_l0_step(float *d_res, float *d_vec, int *d_rows, int n, int d, float alpha, int shift, float prob_thresh, int enforce_l1_decrease){
+
+		int tid = threadIdx.x + blockDim.x*blockIdx.x;
+		if (tid < n){
+
+			int idx = d*tid;
+			float omega = d_res[d_rows[d*tid + shift]];
+			float prob_zero_u = probability_zero(omega);
+			float update = 0.0;
+			int score = 0;
+
+			if (prob_zero_u <= 1 - prob_thresh){ 
+				float v;
+
+				float num_equal = 0.0;
+				float sum_updates = 0.0;
+				for (int i = 0; i < d; i++){
+
+					// get value
+					v = d_res[d_rows[d*tid + i]];
+
+					// compute Prob(v = omega)
+					if (probability_equal(v - omega) >= prob_thresh){
+						score += 1;
+						sum_updates += v;
+						num_equal += 1;
+					}
+
+					// compute Prob(v = 0)
+					if (probability_zero(v) >= 1 - prob_thresh){
+						score -= 1;
+					}
+
+				}
+				if (num_equal > 0){
+					update = sum_updates/num_equal;
+				}else{
+					update = 0;
+				}
+			}else{
+				update = 0;
+			}
+
+			// update
+
+			if (((float) score) >= alpha){
+
+				//float omega = 0.0;
+
+				//omega = d_res[d_rows[idx + shift]];
+
+				int do_update = 1;
+
+				if (enforce_l1_decrease == 1){
+					float new_energy = 0.0;
+					float old_energy = 0.0;
+					for (int i = 0; i < d; i++){
+						old_energy += abs(d_res[d_rows[idx + i]]);
+						new_energy += abs(d_res[d_rows[idx + i]] - update);
+					}
+					if (new_energy > old_energy){
+						do_update = 0;
+					}
+				}
+
+				
+				if (do_update == 1){
+					d_vec[tid] = d_vec[tid] + update;
+				}
+			}
+		}
+	}
+	
+
+	/*
+	*************************************************
+	*
+	* 	Adaptive-Robust-L0			
+	*						
+	*************************************************
+	*/
+	__constant__ float sigma2_n; 
+	__constant__ float sigma2_s; 
+	__constant__ float snr; 
+
+	__device__ float R2(float z){
+		float res = expf(z) - 1;
+		res -= z;
+		res -= z*z/2;
+		return res;
+	}
+
+	__device__ float R3(float z){
+		float res = expf(z) - 1;
+		res -= z;
+		res -= z*z/2;
+		res -= z*z*z/6;
+		return res;
+	}
+
+	__device__ float pdf_ratio(float x, float t, float q){
+		return sqrtf(t/(q*snr + t))*expf(-(x*x)/(2*sigma2_n)*(1/(q*snr + t) - 1/t));
+	}
+
+	__device__ float pdf_ratio_tail(float x, float t, float z){
+		float a = z*R2(z)/R3(z);
+		return sqrtf(t/(snr*a + 1))*expf(-(x*x)/(2*sigma2_n)*(1/(snr*a + 1) - 1/t));
+	}
+
+	__device__ float prob(float t, float x, float d_rho){
+		float res = 0.0;
+		float z = t*d_rho;
+		res = 1;
+		res += z*pdf_ratio(x, t, 1.0f);
+		res += (z*z/2)*pdf_ratio(x, t, 2.0f);
+		res += (z*z*z/6)*pdf_ratio(x, t, 3.0f);
+		res += (z*z*z*z/24)*pdf_ratio(x, t, 4.0f);
+		//res += R3(z)*pdf_ratio_tail(x, t, z);
+		return 1/(1 + res);
+	}
+
+	__device__ float prob_zero(float x, int d, int k, int m){
+		float d_rho = ((float) d)*((float) k)/((float) m);
+		return prob(1, x, d_rho);
+	}
+
+	__device__ float prob_equal(float x, int d, int k, int m){
+		float d_rho = ((float) d)*((float) k)/((float) m);
+		return 2*prob(2, x, d_rho);
+	}
+
+	__global__ void find_nonzeros(float *d_vec, int *d_vec_ind, int n, int d, int k, int m, float prob_thresh){
+
+		int tid = threadIdx.x + blockDim.x*blockIdx.x;
+
+		if (tid < n){
+			d_vec_ind[tid] = 0;
+			if(prob_zero(d_vec[tid], d, k, m) >= prob_thresh)
+				d_vec_ind[tid] = 1;
+			/*
+			if (d_vec[tid] != 0)
+				d_vec_ind[tid] = 1;
+			*/
+		}
+
+	}
+
+	__global__ void cuda_adaptive_robust_l0_score_and_update(float * d_vec, int alpha, int d, int k, int m, int n, float *d_res, int *d_rows, int shift, float prob_thresh){
+
+		int tid = threadIdx.x + blockDim.x*blockIdx.x;
+
+		if (tid < n){
+
+			int idx = d*tid;
+			float omega = d_res[d_rows[idx + shift]];
+			float prob_nonzero = 0.0;
+			float score = 0;
+			float update = 0.0;
+
+			prob_nonzero = 1 - prob_zero(omega, d, k, m);
+
+			if (prob_nonzero >= prob_thresh){
+
+				float v;
+				float pe = 0.0;
+				float pz = 0.0;
+				
+				float num_eq = 0;
+
+				// Compute scores via maximum likelihood
+
+				for (int i = 0; i < d; i++){
+					v = d_res[d_rows[idx + i]];
+
+					pe = prob_equal(v - omega, d, k, m);
+					pz = prob_zero(v, d, k, m);
+
+					if (pe >= prob_thresh){
+						update += v;
+						score += 1;
+						num_eq += 1;
+					}
+
+					if (pz >= 1 - prob_thresh){
+						score -= 1;
+					}
+
+				}
+
+				if (score < 2)
+					score = 0.0f;
+
+				update = update/num_eq;
+
+			}else{
+
+				score = 0.0f;
+				update = 0.0f;
+
+			}
+
+			if (score >= ((float) alpha)){
+
+				float new_energy = 0.0;
+				float old_energy = 0.0;
+
+				for (int i = 0; i < d; i++){
+					old_energy += abs(d_res[d_rows[idx + i]]);
+					new_energy += abs(d_res[d_rows[idx + i]] - update);
+				}
+				if (new_energy < old_energy){
+					d_vec[tid] = d_vec[tid] + update;
+				}
+			}
+		}
+	}
+
 
 /*
 *************************************************

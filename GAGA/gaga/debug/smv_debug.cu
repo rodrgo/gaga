@@ -10,24 +10,26 @@
 	int nlhs = 8;
 
 	// Define all parameters 
-	char algstr[] = "ssmp_robust";
-	int k = 770;
-	int m = 8546;
+	char algstr[] = "adaptive_robust_l0";
+	float delta = 0.5;
+	float rho = 0.03;
 	int n = 16348;
+	int m = ((int)delta*n);
+	int k = ((int)rho*m);
 	int p = 7;
 
 	// define options
 	unsigned int seed = 294262+111;
 	int vecDistribution = 2;  // 0=uniform, 1=binary, 2=gaussian
 	int matrixEnsemble = 3;  // 1=ones, 2=binary, 3=expander
-	float noise_level = 1.0;
+	float noise_level = 0.01;
 	int kFixedFlag = 0;
 
 	// These options shouldn't matter to replicate bug
 	float band_percentage = 0;
 	int num_bins = max(n/20,1000);
 	int convRateNum = 16;
-	float tol = 10^(-4);
+	float tol = 1;
 	int timingFlag = 0; // off
 	float alpha_start = 0.25;
 	int l0_thresh = 1;
@@ -43,7 +45,7 @@
 	int threads_perblock_bin = 0;
 
 	// set the gpu device properties
-	int gpuNumber = 2;
+	int gpuNumber = 0;
 
 	unsigned int max_threads_per_block;
 	cudaDeviceProp dp;
@@ -78,6 +80,7 @@
 		(strcmp(algstr, "parallel_l0_swipe") == 0) || \
 		(strcmp(algstr, "robust_l0") == 0) || \
 		(strcmp(algstr, "deterministic_robust_l0") == 0) || \
+		(strcmp(algstr, "adaptive_robust_l0") == 0) || \
 		(strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
 
 	    int ccs_indexed_matrix_flag = ((strcmp(algstr, "ssmp") == 0) || \
@@ -90,6 +93,7 @@
 
 	    int robust_ccs_flag = ( (strcmp(algstr, "robust_l0") == 0) || \
 		(strcmp(algstr, "deterministic_robust_l0") == 0) || \
+		(strcmp(algstr, "adaptive_robust_l0") == 0) || \
 		(strcmp(algstr, "ssmp_robust") == 0) || \
 		(strcmp(algstr, "CGIHT") == 0) || \
 		(strcmp(algstr, "CGIHTprojected")) ) ? 1 : 0;
@@ -115,7 +119,6 @@
 
 	// control parameter from inputs
 	    int nz;
-
 	    
 	    if (valid_alg == 0){
 	      printf("[gaga_smv] Error: Algorithm name is nnot valid");
@@ -465,6 +468,7 @@
 	    else if (strcmp(algstr, "robust_l0")==0) alg = 19;
 	    else if (strcmp(algstr, "deterministic_robust_l0")==0) alg = 20;
 	    else if (strcmp(algstr, "ssmp_robust")==0) alg = 21;
+	    else if (strcmp(algstr, "adaptive_robust_l0")==0) alg = 22;
 
       switch (alg) {
 	case 0:
@@ -592,6 +596,10 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 	case 21:
 		ssmp_robust(d_vec, d_y, resid, resid_update, d_rows, d_cols, d_vals, d_rm_rows_index, d_rm_cols, h_max_nonzero_rows_count, d_bin, d_bin_counters, h_bin_counters, residNorm_prev, tol, maxiter, num_bins, k, m, n, p, nz, noise_level, &iter, err, &sum, &time_sum, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, numBlocksr, threadsPerBlockr, timeRecord, resRecord);
 		SAFEcuda("SSMP_ROBUST_S_smv in gaga_smv");
+		break;
+	case 22:
+		adaptive_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+		SAFEcuda("ADAPTIVE_ROBUST_L0_S_smv in gaga_smv");
 		break;
 	default:
 		printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n CGIHT\n");

@@ -21,8 +21,6 @@ inline void ssmp_robust(float *d_vec, float *d_y, float *resid, float *resid_upd
 
 	timeRecord[0] = 0;
 
-	float h_sigma_noise = noise_level;
-
 	int iter = *p_iter;
 	float time_sum = *p_time_sum;
 	int k_bin = 0;
@@ -64,7 +62,6 @@ inline void ssmp_robust(float *d_vec, float *d_y, float *resid, float *resid_upd
 	resRecord[0] = err;
 
 	float err_start = err;
-	float resid_tol = tol;
 
 	float residNorm_diff = 1.0f;
 	float residNorm_evolution[16];
@@ -82,10 +79,15 @@ inline void ssmp_robust(float *d_vec, float *d_y, float *resid, float *resid_upd
 	float h_median;
 	*/
 
-	float norm_res_mean = (h_sigma_noise*h_sigma_noise)*((float) m);
-	float norm_res_sd = (h_sigma_noise*h_sigma_noise)*sqrtf(2 * ((float) m)); 
+	//float norm_res_mean = (h_sigma_noise*h_sigma_noise)*((float) m);
+	//float norm_res_sd = (h_sigma_noise*h_sigma_noise)*sqrtf(2 * ((float) m)); 
 
-	while( (iter < maxiter) & (err*err - norm_res_mean > resid_tol*norm_res_sd) & (err < (100*err_start)) & (residNorm_diff > 0.01*tol) ){
+	float h_sigma2_n = noise_level*noise_level;
+	float norm_1_res_mean = ((float) m)*sqrtf(h_sigma2_n)*sqrtf(2/3.1415926535);
+	float norm_1_res_sd = sqrtf(((float) m)*h_sigma2_n*(1 - sqrtf(2/3.1415926535)));
+	float norm_1_res = cublasSasum(m, d_res, 1);
+
+	while( (iter < maxiter) & (!(norm_1_res - norm_1_res_mean <= tol*norm_1_res_sd)) & (err < (100*err_start)) & (residNorm_diff > 0.01*tol) ){
 		
 		// time variables
 		cudaEvent_t start, stop;
@@ -122,6 +124,7 @@ inline void ssmp_robust(float *d_vec, float *d_y, float *resid, float *resid_upd
 		}
 
 		err = cublasSnrm2(m, d_res, 1);
+		norm_1_res = cublasSasum(m, d_res, 1);
 
 		// Stopping conditions
 		for(int i = 0; i < 15; i++){

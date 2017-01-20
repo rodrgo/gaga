@@ -19,6 +19,11 @@
 *.tar.gz
 *.tar
 *.zip
+.nfs*
 
 # Thrust
 GAGA/thrust/*
+
+# Debug folder for CUDA-GDB compilation
+GAGA/gaga/debug/smv_debug
+GAGA/RobustL0code/phase_transitions/plots/transition_all_smv_n_*

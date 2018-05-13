@@ -1,5 +1,9 @@
 function generate_data_bottomup(alg_list, n_list, nonZero_list, delta_list, vecDistribution, RES_TOL, SOL_TOL, tests_per_k, gpuNumber, maxiter_str, band_percentage, noise_levels, l0_thresh)
 
+	load_clips;
+	clip_line = [UPPER_BOUND_CLIP];
+	dlmwrite('results.txt', clip_line, '-append');
+
 	if nargin < 12
 		noise_level = 0.0;
 	end
@@ -45,7 +49,7 @@ function generate_data_bottomup(alg_list, n_list, nonZero_list, delta_list, vecD
 									MAXITER = k;
 								end
 
-								if any(ismember({'robust_l0'}, {alg}))
+								if any(ismember({'rand_robust_l0'}, {alg}))
 									MAXITER = min(k, 1000);
 								end
 								
@@ -59,7 +63,7 @@ function generate_data_bottomup(alg_list, n_list, nonZero_list, delta_list, vecD
 
 									% We check convergence for robust_l0 in a different way
 
-									if any(ismember({'deterministic_robust_l0', 'robust_l0', 'ssmp_robust', 'ssmp'}, {alg}))
+									if any(ismember({'robust_l0', 'robust_l0_adaptive', 'robust_l0_trans', 'robust_l0_adaptive_trans', 'ssmp_robust', 'smp_robust', 'cgiht_robust'}, {alg}))
 											% Inspired by SSMP theoretical guarantee
 											% \|x - xhat\|_1 = O(E[\|eta\|_1])
 											% \|eta\|_1 = \sum_i |eta_i| with each eta_i ~ N(0, sigma^2)
@@ -76,7 +80,9 @@ function generate_data_bottomup(alg_list, n_list, nonZero_list, delta_list, vecD
 											mean_err1 = m*noise_level*sqrt(2/pi);
 											sd_err1 = sqrt(m)*noise_level*sqrt(1 - 2/pi);
 											mean_signal_norm = k*sqrt(2/pi);
-											converged(i) = (errors(1) <= (mean_err1 + SOL_TOL*sd_err1)/mean_signal_norm);
+											upper_bound = min((mean_err1 + SOL_TOL*sd_err1)/mean_signal_norm, UPPER_BOUND_CLIP);
+											converged(i) = (errors(1) <= upper_bound);
+											%fprintf('delta = %1.2f, rho = %1.2f, test = %d, upper_bound = %g, error = %g, iters = %d, k = %d, converged = %d\n', m/n, k/m, i, upper_bound, errors(1), iters, k, converged(i));
 									else
 											converged(i) = (errors(2) <= SOL_TOL);
 									end

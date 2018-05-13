@@ -341,18 +341,18 @@ int createMeasurements_smv(const int m, const int n, float *d_vec_input, float *
 
     // Perform checks to see matrix is now left-d-regular and has no zero rows.
     h_exists_zero_row = 0;
-    int * d_exists_zero_row;
-    cudaMalloc((void**)&d_exists_zero_row, 1 * sizeof(int));
-    cudaMemcpy(d_exists_zero_row, &zero, sizeof(int), cudaMemcpyHostToDevice); 
+    int * d_exists_zero_row_2;
+    cudaMalloc((void**)&d_exists_zero_row_2, 1 * sizeof(int));
+    cudaMemcpy(d_exists_zero_row_2, &zero, sizeof(int), cudaMemcpyHostToDevice); 
 
     zero_vector_int<<<numBlocksm, threadsPerBlockm>>>(d_nonzero_rows, m);
     cudaDeviceSynchronize();
     flag_nonzero_rows<<<numBlocksnp, threadsPerBlocknp>>>(d_rows, d_nonzero_rows, n, p);
     cudaDeviceSynchronize();
 
-    check_zero_rows<<<numBlocksm, threadsPerBlockm>>>(d_nonzero_rows, d_exists_zero_row, m);
-    cudaMemcpy(&h_exists_zero_row, d_exists_zero_row, sizeof(int), cudaMemcpyDeviceToHost);
-    cudaFree(d_exists_zero_row);
+    check_zero_rows<<<numBlocksm, threadsPerBlockm>>>(d_nonzero_rows, d_exists_zero_row_2, m);
+    cudaMemcpy(&h_exists_zero_row, d_exists_zero_row_2, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaFree(d_exists_zero_row_2);
     cudaDeviceSynchronize();
 
     // check for repeated rows in columns (this should not happen, but we still perform the check)

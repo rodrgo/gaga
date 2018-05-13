@@ -704,7 +704,7 @@ inline void results_dct_noise(float *d_vec, float *d_vec_input, int vecDistribut
 
 
 
-inline void results_smv_noise(float *d_vec, float *d_vec_input, int vecDistribution, float *residNorm_prev, float *h_norms, float *h_out, float *h_times, float *convergence_rate, int *total_iter, int *checkSupport, int iter, float timeIHT, float time_sum, int *p_sum, const int k, const int m, const int n, const int p, const int matrixEnsemble, unsigned int seed, float noise_level, cudaEvent_t *p_startTest, cudaEvent_t *p_stopTest, char* algstr, dim3 numBlocks, dim3 threadsPerBlock, float band_percentage)
+inline void results_smv_noise(float *d_vec, float *d_vec_input, int vecDistribution, float *residNorm_prev, float *h_norms, float *h_out, float *h_times, float *convergence_rate, int *total_iter, int *checkSupport, int iter, float timeIHT, float time_sum, int *p_sum, const int k, const int m, const int n, const int p, const int matrixEnsemble, unsigned int seed, float noise_level, cudaEvent_t *p_startTest, cudaEvent_t *p_stopTest, char* algstr, dim3 numBlocks, dim3 threadsPerBlock, float band_percentage, int fail_update_flag)
 {
   float convRate, root;
   int temp = min(iter, 16);
@@ -826,6 +826,12 @@ inline void results_smv_noise(float *d_vec, float *d_vec_input, int vecDistribut
   relsupnorm = abs(relsupnorm);
   relsupnorm = relsupnorm/vec_input_supnorm;
   h_norms[2] = relsupnorm;
+
+  if (fail_update_flag == 1){
+    h_norms[0] = 1.0f;
+    h_norms[1] = 1.0f;
+    h_norms[2] = 1.0f;
+  }
 
 
   cudaEvent_t startTest = *p_startTest;

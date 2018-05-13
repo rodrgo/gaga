@@ -10,7 +10,7 @@ d = 7;
 deltas = [0.001 0.01 0.05];
 
 %RES_TOL = 1;
-RES_TOL = 1;
+RES_TOL = 0;
 SOL_TOL = 1;
 l0_thresh = 2;
 noise_levels = [1e-3, 1e-2, 1e-1];

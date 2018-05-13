@@ -1,0 +1,1 @@
+UPPER_BOUND_CLIP = 1e-1;

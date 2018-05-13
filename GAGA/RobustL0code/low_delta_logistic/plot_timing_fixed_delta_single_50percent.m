@@ -1,15 +1,27 @@
 
 clear all;
 
-algorithms = {'deterministic_robust_l0'};
+algorithms = {'robust_l0', 'robust_l0_adaptive', 'robust_l0_trans', 'robust_l0_adaptive_trans'};
+%, 'deterministic_robust_l0'};
 statistic = 'mean'; % mean, median, mean_converged
+
+load_clips;
+
+% Font size
+fs = [];
+fs.title = 20;
+fs.legend = 17;
+fs.axis = 20;
+fs.ticks = 20;
+
+s_list = '+o*xsdh^v><p.';
 
 % ===============
 % Set tolerances
 % ==============
 
 SOL_TOL = 1;
-RES_TOL = 1;
+RES_TOL = 0;
 
 % ===============
 % Extract data
@@ -68,12 +80,13 @@ end
 %converged = errs <= TOL;
 %%%%% Convergence of noisy algos
 
-assert(all(ismember(algNames, {'deterministic-robust-l0', 'robust-l0', 'ssmp-robust'})));
+assert(all(ismember(algNames, {'robust-l0', 'robust-l0-adaptive', 'robust-l0-trans', 'robust-l0-adaptive-trans', 'ssmp-robust', 'smp-robust'})));
 
 mean_err1 = ms.*noise_levels*sqrt(2/pi);
 sd_err1 = sqrt(ms).*noise_levels*sqrt(1 - 2/pi);
 mean_signal_norm = ks*sqrt(2/pi);
-converged = errs_1 <= (mean_err1 + SOL_TOL*sd_err1)./mean_signal_norm;
+upper_bound = min((mean_err1 + SOL_TOL*sd_err1)./mean_signal_norm, UPPER_BOUND_CLIP);
+converged = errs_1 <= upper_bound;
 
 %%%%%
 
@@ -98,9 +111,10 @@ ds.errs_1 = errs_1(ind);
 ds.noise_levels = noise_levels(ind);
 
 noise_level_list = unique(ds.noise_levels);
-noiseDataList = cell(1, length(noise_level_list));
 
 dataArray = [];
+
+pt_data = {};
 
 for iii = 1:length(noise_level_list)
 
@@ -116,7 +130,6 @@ for iii = 1:length(noise_level_list)
 
 		ind_n = ds.ns == n;
 		mList = unique(ds.ms(ind_sigma & ind_n));
-		mDataList = cell(1, length(mList));
 
 		for j = 1:length(mList)
 
@@ -124,7 +137,6 @@ for iii = 1:length(noise_level_list)
 
 			ind_m = ds.ms == m; 
 			algList = unique(ds.algCodes(ind_sigma & ind_m & ind_n));
-			algDataList = cell(1, length(algList));
 
 			for i = 1:length(algList)
 
@@ -155,15 +167,11 @@ for iii = 1:length(noise_level_list)
 				end
 				phaseTransition = [kList/m probs timings];
 				phaseTransition = phaseTransition(phaseTransition(:, 2) >= 0.5, :);
-				algDataList{i} = phaseTransition;
+				pt_data{end+1} = {algList(i), mList(j), nList(ii), noise_level_list(iii), round(mList(j)/nList(ii), 4), phaseTransition};
 
 			end
-			mDataList{j} = {algList, algDataList};
-
 		end
-		nDataList{ii} = {mList, mDataList};
 	end
-	noiseDataList{iii} = {nList, nDataList};
 end
 
 %%
@@ -193,63 +201,89 @@ wdi = './plots/';
 
 %%
 % Plot only timing aggregated by delta
-% We will plot one figure per (noise_level) and one curve per (delta, algorithm, n)
+% We will plot one figure per (delta, noise_level) and one curve per (algorithm, n)
 
 if plotTimingTogether
 
-	for iii = 1:length(noise_level_list)
+	% We want one plot for each delta (value of m), so get a list of all m's
 
-		numFigures = numFigures + 1;
-		figure(numFigures);
-		set(gcf, 'color', [1 1 1]);
-		set(gca, 'Fontname', 'Times', 'Fontsize', 15);
-		handles = [];
-		labels = [];
+	alg_values = cellfun(@(v) v{1}, pt_data);
+	n_values = cellfun(@(v) v{3}, pt_data);
+	noise_values = cellfun(@(v) v{4}, pt_data);
+	delta_values = cellfun(@(v) v{5}, pt_data);
 
-		noise_level = noise_level_list(iii);
-		nList = noiseDataList{iii}{1};
-		nDataList = noiseDataList{iii}{2};
+	alg_levels = unique(alg_values);
+	n_levels = unique(n_values);
+	noise_levels = unique(noise_values);
+	delta_levels = unique(delta_values);
 
-		for ii = 1:length(nList)
+	for i = 1:length(delta_levels)
+		delta = delta_levels(i);
+		for ii = 1:length(noise_levels)
+			noise_level = noise_levels(ii);
 
-			n = nList(ii);
-			mList = nDataList{ii}{1};
-			mDataList = nDataList{ii}{2};
+			numFigures = numFigures + 1;
+			fig = figure(numFigures);
+			set(gcf, 'color', [1 1 1]);
+			set(gca, 'Fontname', 'Times', 'Fontsize', 15);
+			handles = [];
+			labels = {};
 
-			for j = 1:length(mList)
-				algList = mDataList{j}{1};
-				algDataList = mDataList{j}{2};
-
-				delta = mList(j)/n
+			idx = find(delta_values == delta & noise_values == noise_level);
+			for iii = 1:length(idx)
 				deltaExp = round(log10(delta));
+				alg_code = pt_data{idx(iii)}{1};
+				alg_name = algNames{alg_code};
+				n = pt_data{idx(iii)}{3};
+				pt = pt_data{idx(iii)}{6};
 				fprintf('Processing n = 2^{%d}, delta = 10^{%d}, sigma = %1.3f\n', log2(n), deltaExp, noise_level);
 
-				for i = 1:length(algDataList)
-					fprintf('\t%s\n', algNames{i});
-					pt = algDataList{i};
-					if ~isempty(pt)
-						pt
-						handles(end + 1) = semilogy(pt(:,1), pt(:,3), strcat('-', marks(j)), LW, 2, MS, 8, 'Color', colorList(ii, :));
-						labels{end + 1} = ['\delta=' sprintf('%1.3f, n=2^{%s}', delta, num2str(log2(n)))];
-						hold on;
+				if ~isempty(pt)
+					pt
+					mark_pos = find(alg_code == alg_levels);
+					if n == 2^(22)
+						linepattern = '--';
+						linewidth = 2;
+						marksize = 10;
+					else
+						linepattern = '-';
+						linewidth = 3;
+						marksize = 11;
 					end
-					%hold on;
+					linestyle = strcat(linepattern, s_list(mark_pos));
+					handles(end + 1) = semilogy(pt(:,1), pt(:,3), linestyle, LW, linewidth, MS, marksize, 'Color', colorList(find(n == n_levels), :));
+					labels{end + 1} = sprintf('n=2^{%d}, %s',  floor(log2(n)), change_names(alg_name));
+					hold on;
 				end
+
 			end
+
+			if delta == 0.001 && noise_level == 0.01
+				legend(handles, labels, 'Location', 'NorthEast', 'FontSize', fs.legend);
+			end
+
+			ylim([0, 0.3*1e2]);
+			xlim([0, 0.18]);
+			xlabel('\rho = k/m', 'FontSize', fs.axis),...
+			ylabel('Average time (sec)', 'FontSize', fs.axis);
+
+			% Tick size
+			xt = get(gca, 'XTick');
+			set(gca, 'FontSize', fs.ticks);
+
+			xt = get(gca, 'YTick');
+			set(gca, 'FontSize', fs.ticks);
+
+			title(['\delta = ', sprintf('%1.3f', delta), ', \sigma = ' sprintf('%1.3f', noise_level)], 'FontSize', fs.title);
+			%title({sprintf('\delta = %1.2f', delta), ['\sigma = ' sprintf('%1.3f', noise_level)]});
+
+			hold off;
+			fileName = fullfile(wdi, ['timing_fixed_delta_single_50percent_', sprintf('%1.2f', delta), '_', sprintf('%1.3f_', noise_level), '_', statistic]);
+			print('-dpdf', strcat(fileName, '.pdf'));
+			print('-depsc',strcat(fileName, '.eps'));
+
 		end
-
-		legend(handles, labels, 'Location', 'NorthWest');
-		ylim([0, 1e2]);
-		xlim([0, 0.2]);
-		xlabel('\rho = k/m'),...
-		ylabel('Average time (sec)');
-
-		title({'deterministic-robust-l0', ['\sigma = ' sprintf('%1.3f', noise_level)]});
-
-		hold off;
-		fileName = fullfile(wdi, ['timing_fixed_delta_single_50percent_', sprintf('%1.3f_', noise_level_list(iii)), '_', statistic]);
-		print('-dpdf', strcat(fileName, '.pdf'));
-		print('-depsc',strcat(fileName, '.eps'));
 	end
+
 end
 

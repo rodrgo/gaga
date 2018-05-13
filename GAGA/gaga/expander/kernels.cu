@@ -703,6 +703,7 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 	__constant__ float sigma2_n; 
 	__constant__ float sigma2_s; 
 	__constant__ float snr; 
+	__constant__ int boost_flag;
 
 	__device__ float R2(float z){
 		float res = expf(z) - 1;
@@ -723,6 +724,7 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 		return sqrtf(t/(q*snr + t))*expf(-(x*x)/(2*sigma2_n)*(1/(q*snr + t) - 1/t));
 	}
 
+
 	__device__ float pdf_ratio_tail(float x, float t, float z){
 		float a = z*R2(z)/R3(z);
 		return sqrtf(t/(snr*a + 1))*expf(-(x*x)/(2*sigma2_n)*(1/(snr*a + 1) - 1/t));
@@ -740,6 +742,132 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 		return 1/(1 + res);
 	}
 
+	// BEGIN: Probabilities with residual
+
+
+	__device__ float res_prob_2(float z){
+		float res = expf(z);
+		res -= 1;
+		res -= z;
+		res -= z*z/2;
+		return res;
+	}
+
+	__device__ float res_prob_3(float z){
+		float res = expf(z);
+		res -= 1;
+		res -= z;
+		res -= z*z/2;
+		res -= (z*z*z)/6;
+		return res;
+	}
+
+	__device__ float sigma2_tail_wr_3(float t, float d_rho, float r3){
+		//return sigma2_n*(snr*t*d_rho*res_prob_2(t, d_rho)/res_prob_3(t, d_rho) + t);
+		float z = t*d_rho;
+		float r2 = r3 + (z*z*z)/6;
+		return ((sigma2_s*t*d_rho)*r2 + t*sigma2_n*r3)/r3;
+	}
+
+	__device__ float pdf_ratio_tail_wr_3(float x, float t, float d_rho, float r3){
+		float sigma2_tail = sigma2_tail_wr_3(t, d_rho, r3);
+		return sqrtf(t*sigma2_n/sigma2_tail)*expf(-(x*x)/2*(1/sigma2_tail - 1/(t*sigma2_n)));
+	}
+
+	__device__ float prob_wr(float t, float x, float d_rho, float rho){
+		float res = 0.0;
+		float z = t*d_rho;
+		float factor = 1.0;
+
+		res += 1;
+		factor = factor*(z/1);
+		res += factor*pdf_ratio(x, t, 1.0f);
+		factor = factor*(z/2);
+		res += factor*pdf_ratio(x, t, 2.0f);
+		factor = factor*(z/3);
+		res += factor*pdf_ratio(x, t, 3.0f);
+
+		
+		float res_test = res;
+		float r3 = res_prob_3(z);
+		res_test += r3*pdf_ratio_tail_wr_3(x, t, d_rho, r3);
+
+		/*
+
+		factor = factor*(z/4);
+		res += factor*pdf_ratio(x, t, 4.0f);
+		factor = factor*(z/5);
+		res += factor*pdf_ratio(x, t, 5.0f);
+		factor = factor*(z/6);
+		res += factor*pdf_ratio(x, t, 6.0f);
+		factor = factor*(z/7);
+		res += factor*pdf_ratio(x, t, 7.0f);
+		factor = factor*(z/8);
+		res += factor*pdf_ratio(x, t, 8.0f);
+
+		factor = factor*(z/9);
+		res += factor*pdf_ratio(x, t, 9.0f);
+		factor = factor*(z/10);
+		res += factor*pdf_ratio(x, t, 10.0f);
+
+		*/
+
+		/*
+		res_test = res;
+
+
+		factor = factor*(z/11);
+		res += factor*pdf_ratio(x, t, 11.0f);
+		factor = factor*(z/12);
+		res += factor*pdf_ratio(x, t, 12.0f);
+		factor = factor*(z/13);
+		res += factor*pdf_ratio(x, t, 13.0f);
+		if (abs(1/res - 1/res_test) >=1e-3){
+			printf("%g, rho=%g, ERROR=%g\n", t, rho, abs(1/res - 1/res_test));
+		}
+		*/
+		
+		return 1/(res);
+
+	}
+
+	__device__ float prob_zero(float x, int d, int k, int m){
+		float d_rho = ((float) d)*((float) k)/((float) m);
+		float rho = ((float)k)/((float)m);
+		float p = prob_wr(1, x, d_rho, rho);
+		return p;
+		//return prob_wr(1, x, d_rho);
+	}
+
+	__device__ float prob_equal(float x, int d, int k, int m){
+		float d_rho = ((float) d)*((float) k)/((float) m);
+		float rho = ((float)k)/((float)m);
+		float p = prob_wr(2, x, d_rho, rho);
+		return p;
+		//return prob_wr(2, x, d_rho);
+	}
+
+	__global__ void compute_prob_zero_at_zero(float *d_prob_zero_at_zero, int d, int k, int m){
+		int tid = threadIdx.x + blockDim.x*blockIdx.x;
+
+		if (tid == 0){
+			d_prob_zero_at_zero[tid] = prob_zero(0, d, k, m);
+		}
+
+	}
+
+	__global__ void get_probs_nonzero(float *d_probs_nonzero, float *d_res, int d, int k, int m){
+
+		int tid = threadIdx.x + blockDim.x*blockIdx.x;
+
+		if (tid < m){
+			float omega = d_res[tid];
+			d_probs_nonzero[tid] = 1 - prob_zero(omega, d, k, m);
+		}
+
+	}
+
+	/*
 	__device__ float prob_zero(float x, int d, int k, int m){
 		float d_rho = ((float) d)*((float) k)/((float) m);
 		return prob(1, x, d_rho);
@@ -750,23 +878,40 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 		return 2*prob(2, x, d_rho);
 	}
 
-	__global__ void find_nonzeros(float *d_vec, int *d_vec_ind, int n, int d, int k, int m, float prob_thresh){
+	__device__ float prob(float t, float x, float d_rho){
+		float res = 0.0;
+		float z = t*d_rho;
+		res = 1;
+		res += z*pdf_ratio(x, t, 1.0f);
+		res += (z*z/2)*pdf_ratio(x, t, 2.0f);
+		res += (z*z*z/6)*pdf_ratio(x, t, 3.0f);
+		res += (z*z*z*z/24)*pdf_ratio(x, t, 4.0f);
+		return 1/(1 + res);
+	}
+
+	*/
+
+
+	// END: Probabilities with residual
+
+
+	__global__ void find_nonzeros(float *d_vec, float *d_vec_ind, int n, int d, int k, int m, float prob_thresh, float *d_prob_zero_at_zero){
 
 		int tid = threadIdx.x + blockDim.x*blockIdx.x;
 
 		if (tid < n){
-			d_vec_ind[tid] = 0;
-			if(prob_zero(d_vec[tid], d, k, m) >= prob_thresh)
-				d_vec_ind[tid] = 1;
+			// Probability of nonzero being large
+			d_vec_ind[tid] = prob_zero(d_vec[tid], d, k, m)/d_prob_zero_at_zero[0];
+
 			/*
-			if (d_vec[tid] != 0)
+			if(1 - prob_zero(d_vec[tid], d, k, m) >= prob_thresh)
 				d_vec_ind[tid] = 1;
 			*/
 		}
 
 	}
 
-	__global__ void cuda_adaptive_robust_l0_score_and_update(float * d_vec, int alpha, int d, int k, int m, int n, float *d_res, int *d_rows, int shift, float prob_thresh){
+	__global__ void cuda_adaptive_robust_l0_score_and_update(float * d_vec, int alpha, int d, int k, int m, int n, float *d_res, int *d_rows, int shift, float prob_thresh, float *d_prob_zero_at_zero){
 
 		int tid = threadIdx.x + blockDim.x*blockIdx.x;
 
@@ -778,40 +923,51 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 			float score = 0;
 			float update = 0.0;
 
-			prob_nonzero = 1 - prob_zero(omega, d, k, m);
+			prob_nonzero = 1 - prob_zero(omega, d, k, m)/d_prob_zero_at_zero[0];
 
 			if (prob_nonzero >= prob_thresh){
 
 				float v;
 				float pe = 0.0;
 				float pz = 0.0;
+				float pe_zero = prob_equal(0, d, k, m);
+				float pz_zero = prob_zero(0, d, k, m);
 				
 				float num_eq = 0;
 
-				// Compute scores via maximum likelihood
-
-				for (int i = 0; i < d; i++){
-					v = d_res[d_rows[idx + i]];
-
-					pe = prob_equal(v - omega, d, k, m);
-					pz = prob_zero(v, d, k, m);
-
-					if (pe >= prob_thresh){
-						update += v;
-						score += 1;
-						num_eq += 1;
+				if (boost_flag == 1){
+					float pe_sum = 0.0;
+					float pz_sum = 0.0;
+					for (int i = 0; i < d; i++){
+						v = d_res[d_rows[idx + i]];
+						pe = prob_equal(v - omega, d, k, m);
+						pe_sum += pe; 
+						pz_sum += prob_zero(v, d, k, m);
+						update += pe*v;
+						//num_eq += 1;
 					}
-
-					if (pz >= 1 - prob_thresh){
-						score -= 1;
+					score = (pe_sum/pe_zero - pz_sum/pz_zero);
+					update = update/pe_sum;
+					//update = update/num_eq;
+					//update = omega;
+				}else{
+					for (int i = 0; i < d; i++){
+						v = d_res[d_rows[idx + i]];
+						pe = prob_equal(v - omega, d, k, m)/pe_zero;
+						pz = prob_zero(v, d, k, m)/pz_zero;
+						if (pe >= prob_thresh){
+							update += v;
+							score += 1;
+							num_eq += 1;
+						}
+						if (pz >= 1 - prob_thresh){
+							score -= 1;
+						}
 					}
-
+					if (score < 2)
+						score = 0.0f;
+					update = update/num_eq;
 				}
-
-				if (score < 2)
-					score = 0.0f;
-
-				update = update/num_eq;
 
 			}else{
 
@@ -820,7 +976,7 @@ __global__ void count_nonzeros_in_rows_index(float *nonzero_rows_count, int *rm_
 
 			}
 
-			if (score >= ((float) alpha)){
+			if (score >= ((float) alpha) - 0.05){
 
 				float new_energy = 0.0;
 				float old_energy = 0.0;

@@ -6,6 +6,8 @@
 
 function add_logit_data(alg, ensemble, SOL_TOL)
 
+load_clips;
+
 % One results file per algorithm
 % (may have data for various noise levels)
 
@@ -87,11 +89,12 @@ for cell_num = 1:length(results_cell)
         if length(ind)>=min_tests
           num_tests=[num_tests; length(ind)];
 
-          if any(ismember({'deterministic_robust_l0', 'robust_l0', 'ssmp_robust'}, {alg})) 
+          if any(ismember({'robust_l0', 'robust_l0_adaptive', 'robust_l0_trans', 'robust_l0_adaptive_trans', 'ssmp_robust', 'smp_robust', 'cgiht_robust'}, {alg})) 
             mean_err1 = m_list(i)*noise_level*sqrt(2/pi); 
             sd_err1 = sqrt(m_list(i))*noise_level*sqrt(1 - 2/pi); 
-		mean_signal_norm = k_list(j)*sqrt(2/pi);
-            success=[success; sum(results_tmp(ind,7) <= (mean_err1 + SOL_TOL*sd_err1)/mean_signal_norm)/length(ind)];
+            mean_signal_norm = k_list(j)*sqrt(2/pi);
+            upper_bound = min((mean_err1 + SOL_TOL*sd_err1)/mean_signal_norm, UPPER_BOUND_CLIP);
+            success=[success; sum(results_tmp(ind,7) <= upper_bound)/length(ind)];
           else
             % results_tmp(ind, 8) is the l2 norm
             success=[success; sum(results_tmp(ind,8)<=SOL_TOL)/length(ind)];

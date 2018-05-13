@@ -2,7 +2,7 @@ run('../init.m');
 
 alg_list = {'robust_l0'};
 
-GPUnumber = 3;
+GPUnumber = 0;
 maxiter_str = '1k';
 vecDistribution = 'gaussian';
 band_percentage = 0.0;
@@ -14,7 +14,7 @@ delta_list=[linspace(0.1,0.99,20) 0.08 0.06 0.04 0.02];
 tests_per_k = 10;
 
 noise_levels = [1e-3, 1e-2, 1e-1];
-RES_TOL = 1;
+RES_TOL = 0;
 SOL_TOL = 1;
 
 fprintf('Generating data...\n');

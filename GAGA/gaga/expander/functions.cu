@@ -143,3 +143,23 @@ inline void H_k(float *d_vec, int K, int n, int *d_bin, int *d_bin_counters, int
 
 }
 
+inline void H_k_binning(float *d_vec, int K, int n, int *d_bin, int *d_bin_counters, int *h_bin_counters, float *p_maxChange, float *p_max_value, float *p_slope, float *p_minVal, float *p_alpha, int *p_MaxBin, int *p_k_bin, int *p_sum, int num_bins, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
+
+        *p_maxChange = 2 * MaxMagnitude(d_vec, n);
+        *p_max_value = MaxMagnitude(d_vec, n);
+        *p_slope = ((num_bins - 1)/(*p_max_value));
+        *p_minVal = 0.0f;
+        *p_alpha = 0.25f;
+        *p_MaxBin = num_bins; // (int)(num_bins * (1 - alpha));
+        *p_k_bin = 0;
+
+        *p_sum = FindSupportSet(d_vec, d_bin, d_bin_counters, h_bin_counters,
+                *p_slope, *p_max_value, *p_maxChange, p_minVal, p_alpha, p_MaxBin, p_k_bin,
+                n, K, num_bins, numBlocks, threadsPerBlock, numBlocks_bin,
+                threadsPerBlock_bin);
+
+        Threshold(d_vec, d_bin, *p_k_bin, n, numBlocks, threadsPerBlock);
+
+	//*p_sum = supportSizeGPU(d_vec, n, numBlocks, threadsPerBlock);
+
+}

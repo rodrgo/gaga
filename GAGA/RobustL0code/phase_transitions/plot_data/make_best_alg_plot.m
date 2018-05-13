@@ -1,4 +1,20 @@
-function [km_list best_alg time_ave_list error_ave_list] = make_best_alg_plot(alg_list, ensemble, n, nonzeros, destination, noise_level, SOL_TOL)
+function [km_list best_alg time_ave_list error_ave_list] = make_best_alg_plot(alg_list, ensemble, n, nonzeros, destination, noise_level, SOL_TOL, name_tag)
+
+% Font size
+fs = [];
+fs.title = 20;
+fs.legend = 17;
+fs.axis = 20;
+fs.ticks = 20;
+
+MS = 'MarkerSize';
+LW = 'LineWidth';
+
+if nargin < 8
+	name_tag = '';
+end
+
+run('../generate_data/load_clips.m');
 
 tic
 if ~strcmp(ensemble, 'smv')
@@ -33,11 +49,12 @@ if true
 
 		ks = km(:, 1);
 		ms = km(:, 2);
-		if any(ismember({'deterministic_robust_l0', 'robust_l0', 'ssmp_robust'}, {alg_list{i}}))
+		if any(ismember({'robust_l0', 'robust_l0_adaptive', 'robust_l0_trans', 'robust_l0_adaptive_trans', 'ssmp_robust', 'smp_robust', 'cgiht_robust'}, {alg_list{i}}))
 			mean_err1 = ms*noise_level*sqrt(2/pi);
 			sd_err1 = sqrt(ms)*noise_level*sqrt(1 - 2/pi);
 			mean_signal_norm = ks*sqrt(2/pi);
-			converged = (errs <= (mean_err1 + SOL_TOL*sd_err1)./mean_signal_norm);
+			upper_bound = min((mean_err1 + SOL_TOL*sd_err1)./mean_signal_norm, UPPER_BOUND_CLIP);
+			converged = (errs <= upper_bound);
 		else
 			converged = (errs <= SOL_TOL);
 		end
@@ -100,11 +117,13 @@ if true
 	% plot a map of which algorithm is best for each kmn
 
 	figure(1)
+	set(gcf, 'color', [1 1 1]);
+	set(gca, 'fontname', 'times', 'fontsize', 15);
 	hold off
 
 	%c_list = 'rgbcmykw';
 	clist = createColorPalette(alg_list);
-	s_list = '+o*.xsdh^v><p';
+	s_list = '+o*xsdh^v><p.';
 	names_list = {'plus', 'circle', 'asterisk', 'point', 'cross', 'square', 'diamond', 'hexagram', 'up-triangle', 'down-triangle', 'right-triangle', 'left-triangle', 'pentagram'};
 	num_best=zeros(13,1);  % MAX SIX ALGOS
 
@@ -120,27 +139,42 @@ if true
 		best_ind_list(j)=best_ind;
 		num_best(best_ind)=num_best(best_ind)+1;
 		txt=[s_list(best_ind)];
-		plot3(km_list(j,2)/n,km_list(j,1)/km_list(j,2),best_ind,txt, 'Color', clist(best_ind,:))
+		plot3(km_list(j,2)/n,km_list(j,1)/km_list(j,2),best_ind,txt, 'Color', clist(best_ind,:), MS, 10)
 		hold on
 	end
+
+	axis([0 1 0 1]);
 	hold off
 		
 	view([0 90])
-	top=0.9;
+	top=0.6;
 	for i = 1:num_algs
 		if any(best_ind_list == i)
-			h = text(0.1, top, 0, strcat(strrep(alg_list{i}, '_', '-'), ': ', names_list{i})); % fix name
-			set(h, 'Color', clist(i, :))
+			h = text(0.1, top, 0, strcat(strrep(change_names(alg_list{i}), '_', '-'), ': ', names_list{i}), 'FontSize', fs.legend); % fix name set(h, 'Color', clist(i, :))
 			top = top - 0.05;
 		end
 	end
 
 	axis([0 1 0 1])
-	xlabel('\delta=m/n','fontsize',14);
-	ylabel('\rho=k/m','fontsize',14);
+
+	ylim([0 0.7])
+	xlabel('\delta=m/n','FontSize',fs.axis);
+	ylabel('\rho=k/m','FontSize',fs.axis);
+
+	% Tick size
+	xt = get(gca, 'XTick');
+	set(gca, 'FontSize', fs.ticks);
+
+	xt = get(gca, 'YTick');
+	set(gca, 'FontSize', fs.ticks);
 	 
-	title(['Algorithm selection map for d = ' num2str(nonzeros) ' with n = 2^{' num2str(log2(n)) '}' '\sigma=' sprintf('%1.3f', noise_level)],'Fontsize',12)
+	title_str = {'Algorithm selection map', sprintf('$$d = %i$$, $$n = 2^{%i}$$, $$\\sigma = %1.3f$$', nonzeros, log2(n), noise_level)};
+	title(title_str, 'interpreter', 'latex', 'FontSize', fs.title);
+	%title(['Algorithm selection map for d = ' num2str(nonzeros) ' with ' sprintf('2^{%2.0f}', log2(n)) '\sigma=' sprintf('%1.3f', noise_level)],'Fontsize',12)
 	fname_out=[destination '/algorithm_selection_' ensemble '_n_' num2str(n) '_nonzeros_' num2str(nonzeros) '_sigma_' sprintf('%1.3f', noise_level)];
+	if ~isempty(name_tag)
+		fname_out = [fname_out '_' name_tag];
+	end
 	print('-dpdf', strcat(fname_out, '.pdf'))
 	print('-depsc', strcat(fname_out, '.eps'))
 	 
@@ -148,8 +182,9 @@ if true
 	% make a plot of the time
 
 	figure(2)
+	set(gcf, 'color', [1 1 1]);
+	set(gca, 'Fontname', 'Times', 'Fontsize', 15);
 	hold off
-	set(gca,'fontsize',14)
 
 	a=sort(time_ave_list,'descend');
 	c=round(length(a)*0.05);
@@ -186,14 +221,28 @@ if true
 	shading interp
 	view([0 90])
 	axis([0 1 0 1])
+	%colormap(gray(256)); % Remove this one for coloured interpolation
 	colorbar
-	xlabel('\delta=m/n','fontsize',14);
-	ylabel('\rho=k/m','fontsize',14);
-	 
+	
+	ylim([0 0.7])
+	xlabel('\delta=m/n','FontSize',fs.axis);
+	ylabel('\rho=k/m','FontSize',fs.axis);
 
-	title(['Time (ms) of fastest algorithm for d = ' num2str(nonzeros) ' with n = 2^{' num2str(log2(n)) '}' ' \sigma=' sprintf('%1.3f', noise_level)],'Fontsize',12)
+	% Tick size
+	xt = get(gca, 'XTick');
+	set(gca, 'FontSize', fs.ticks);
+
+	xt = get(gca, 'YTick');
+	set(gca, 'FontSize', fs.ticks);
+	 
+	title_str = {'Time (ms) of fastest algorithm', sprintf('$$d = %i$$, $$n = 2^{%i}$$, $$\\sigma = %1.3f$$', nonzeros, log2(n), noise_level)};
+	title(title_str, 'interpreter', 'latex', 'FontSize', fs.title);
+	%title(['Time (ms) of fastest algorithm for d = ' num2str(nonzeros) ' with ' sprintf('n=2^{%2.0f}', log2(n)) ' \sigma=' sprintf('%1.3f', noise_level)],'Fontsize',12)
 
 	fname_out=[destination '/best_time_' ensemble '_n_' num2str(n) '_nonzeros_' num2str(nonzeros) '_sigma_' sprintf('%1.3f', noise_level)];
+	if ~isempty(name_tag)
+		fname_out = [fname_out '_' name_tag];
+	end
 	print('-dpdf', strcat(fname_out, '.pdf'))
 	print('-depsc', strcat(fname_out, '.eps'))
 
@@ -207,8 +256,9 @@ if true
 		converged_list_i = converged_cell{i};
 
 		figure(2 + i)
+		set(gcf, 'color', [1 1 1]);
+		set(gca, 'Fontname', 'Times', 'Fontsize', 15);
 		hold off
-		set(gca,'fontsize',14)
 
 		%ind = find(error_list_i < error_tol);
 		ind = find(converged_list_i);
@@ -253,19 +303,33 @@ if true
 		shading interp
 		view([0 90])
 		axis([0 1 0 1])
+		%colormap(gray(256)); % Remove this one for coloured interpolation
 		colorbar
 
-		xlabel('\delta = m/n','fontsize',14);
-		ylabel('\rho = k/m','fontsize',14);
+		ylim([0 0.7])
+		xlabel('\delta = m/n','fontsize',fs.axis);
+		ylabel('\rho = k/m','fontsize',fs.axis);
 
-		title(['Time (ms) of ' strrep(alg_list{i}, '_', '-') ' / fastest algorithm for d = ' num2str(nonzeros) ' with n = 2^{' num2str(log2(n)) '}' ' \sigma=' sprintf('%1.3f', noise_level)],'Fontsize',12) % fix name
+		% Tick size
+		xt = get(gca, 'XTick');
+		set(gca, 'FontSize', fs.ticks);
 
-		fname_out=[destination '/' alg_list{i} '_ratio_' ensemble '_n_' num2str(n) '_nonzeros_' num2str(nonzeros) '_sigma_' sprintf('%1.3f', noise_level)];
+		xt = get(gca, 'YTick');
+		set(gca, 'FontSize', fs.ticks);
+
+		title_str = {sprintf('Time (ms) of %s / fastest algorithm for', strrep(change_names(alg_list{i}), '_', '-')), sprintf('$$d = %i$$, $$n = 2^{%i}$$, $$\\sigma = %1.3f$$', nonzeros, log2(n), noise_level)};
+		title(title_str, 'interpreter', 'latex', 'FontSize', fs.title);
+		%title(['Time (ms) of ' strrep(change_names(alg_list{i}), '_', '-') ' / fastest algorithm for d = ' num2str(nonzeros) ' with ' sprintf('n=2^{%2.0f}', log2(n)) ' \sigma=' sprintf('%1.3f', noise_level)],'Fontsize',12) % fix name
+
+		fname_out=[destination '/' change_names(alg_list{i}) '_ratio_' ensemble '_n_' num2str(n) '_nonzeros_' num2str(nonzeros) '_sigma_' sprintf('%1.3f', noise_level)];
+		if ~isempty(name_tag)
+			fname_out = [fname_out '_' name_tag];
+		end
 		print('-dpdf', strcat(fname_out, '.pdf'))
 		print('-depsc', strcat(fname_out, '.eps'))
 
 		ind=find(delta<0.5);
-		display(sprintf(strcat(strrep(alg_list{i}, '_', '-'), ' for delta<0.5 never takes more than %f times the time of the fastest algorith'), max(time_ratio_i(ind)))) % fix name
+		display(sprintf(strcat(strrep(change_names(alg_list{i}), '_', '-'), ' for delta<0.5 never takes more than %f times the time of the fastest algorith'), max(time_ratio_i(ind)))) % fix name
 	end
 
 end

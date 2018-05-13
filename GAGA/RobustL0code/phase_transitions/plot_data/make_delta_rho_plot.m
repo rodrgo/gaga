@@ -282,7 +282,7 @@ if true
     end
     data_sd_mesh=max(data_sd_mesh,min_sd);
     
-    fname1=['plots/delta_rho_' alg '_' ens '_' data_type];
+    fname1=['plots/delta_rho_' change_names(alg) '_' ens '_' data_type];
     fname2=[fname1 '_sd_'];
     fname1=[fname1 '_n' num2str(n)];
     fname2=[fname2 '_n' num2str(n)];
@@ -304,7 +304,7 @@ if true
         colorbar
         xlabel('delta')
         ylabel('rho')
-        print(fname1,'-dpdf')
+        print([fname1 '.pdf'],'-dpdf')
       elseif plot_type==2
         figure(1)
         hold off
@@ -313,7 +313,7 @@ if true
         colorbar
         xlabel('delta')
         ylabel('rho')
-        print(fname1,'-dpdf')
+        print([fname1 '.pdf'],'-dpdf')
         figure(2)
         hold off
         contour(delta_list,rho_list,log10(data_sd_mesh./data_ave_mesh),20);
@@ -321,7 +321,7 @@ if true
         colorbar
         xlabel('delta')
         ylabel('rho')
-        print(fname2,'-dpdf')
+        print([fname2 '.pdf'],'-dpdf')
       elseif plot_type==3
         figure(1)
         hold off
@@ -330,7 +330,7 @@ if true
         colorbar
         xlabel('delta')
         ylabel('rho')
-        print(fname1,'-dpdf')
+        print([fname1 '.pdf'],'-dpdf')
         figure(2)
         hold off
         contour(delta_list,rho_list,log10(data_sd_mesh./data_ave_mesh),20);
@@ -338,7 +338,7 @@ if true
         colorbar
         xlabel('delta')
         ylabel('rho')
-        print(fname2,'-dpdf')
+        print([fname2 '.pdf'],'-dpdf')
       end
     end
 

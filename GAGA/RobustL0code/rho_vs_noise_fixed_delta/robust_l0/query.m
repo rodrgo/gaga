@@ -2,8 +2,8 @@
 run('../init.m');
 
 algs = {'robust_l0'};
+gpuNumber = 1;
 maxiters = {'1k'};
-gpuNumber = 5;
 
 ns = [2^18];
 d = 7;
@@ -15,10 +15,10 @@ rho_start = 0;
 rho_step = 0.01;
 tests_per_rho = 10;
 
-noise_levels = linspace(1e-3, 1e-1, 20);
+noise_levels = 10.^linspace(-3,-1, 20);
 
-RES_TOL = 1;
-SOL_TOL = 1;
+RES_TOL = 0;
+SOL_TOL = 1; 
 
 l0_thresh = 2;
 

@@ -64,9 +64,13 @@
 		(strcmp(algstr, "er_naive") == 0) || \
 		(strcmp(algstr, "ssmp_naive") == 0) || \
 		(strcmp(algstr, "parallel_l0_swipe") == 0) || \
+		(strcmp(algstr, "rand_robust_l0") == 0) || \
 		(strcmp(algstr, "robust_l0") == 0) || \
-		(strcmp(algstr, "deterministic_robust_l0") == 0) || \
-		(strcmp(algstr, "adaptive_robust_l0") == 0) || \
+		(strcmp(algstr, "robust_l0_adaptive") == 0) || \
+		(strcmp(algstr, "robust_l0_adaptive_trans") == 0) || \
+		(strcmp(algstr, "robust_l0_trans") == 0) || \
+		(strcmp(algstr, "smp_robust") == 0) || \
+		(strcmp(algstr, "cgiht_robust") == 0) || \
 		(strcmp(algstr, "ssmp_robust") == 0)) ? 1 : 0;
 
 	    int ccs_indexed_matrix_flag = ((strcmp(algstr, "ssmp") == 0) || \
@@ -77,10 +81,14 @@
 
 	    int serial_ccs_flag = strcmp(algstr, "serial_l0") == 0 ? 1 : 0;
 
-	    int robust_ccs_flag = ((strcmp(algstr, "robust_l0") == 0) || \
-		(strcmp(algstr, "adaptive_robust_l0") == 0) || \
-		(strcmp(algstr, "deterministic_robust_l0") == 0) || \
+	    int robust_ccs_flag = ((strcmp(algstr, "rand_robust_l0") == 0) || \
+		(strcmp(algstr, "robust_l0_adaptive") == 0) || \
+		(strcmp(algstr, "robust_l0_adaptive_trans") == 0) || \
+		(strcmp(algstr, "robust_l0_trans") == 0) || \
+		(strcmp(algstr, "robust_l0") == 0) || \
+		(strcmp(algstr, "smp_robust") == 0) || \
 		(strcmp(algstr, "ssmp_robust") == 0) || \
+		(strcmp(algstr, "cgiht_robust") == 0) || \
 		(strcmp(algstr, "CGIHT") == 0) || \
 		(strcmp(algstr, "CGIHTprojected")) ) ? 1 : 0;
 
@@ -116,7 +124,7 @@
 	    cudaDeviceProp dp;
 	    
 	    if (valid_alg == 0){
-	      printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n smp\n ssmp\n er\n parallel_lddsr\n parallel_l0\n serial_l0\n robust_l0\n deterministic_robust_l0\nFive or eight output arguments only possible if algorithms is CCS.");
+	      printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n smp\n ssmp\n er\n parallel_lddsr\n parallel_l0\n serial_l0\n rand_robust_l0\n robust_l0\nFive or eight output arguments only possible if algorithms is CCS.");
 	    }
 	    else {
 
@@ -507,7 +515,7 @@
 	      SAFEcudaMalloc("grad_previous");
 	    }
 
-	    if ((strcmp(algstr, "CSMPSP")==0) || (strcmp(algstr, "CGIHT")==0)){
+	    if (strcmp(algstr, "CSMPSP")==0 || strcmp(algstr, "CGIHT")==0 || strcmp(algstr, "cgiht_robust")==0){
 	      cudaMalloc((void**)&grad_previous, n * sizeof(float));
 	      SAFEcudaMalloc("grad_previous");
 
@@ -518,7 +526,7 @@
 	      SAFEcudaMalloc("d_bin_counters_grad");
 	    }
 
-	    if (strcmp(algstr, "CGIHT")==0 || strcmp(algstr, "CGIHTprojected")==0){
+	    if (strcmp(algstr, "CGIHT")==0 || strcmp(algstr, "CGIHTprojected")==0 || strcmp(algstr, "cgiht_robust")==0){
 	      cudaMalloc((void**)&grad_prev_thres, n * sizeof(float));
 	      SAFEcudaMalloc("grad_prev_thres");
 	    }
@@ -817,6 +825,7 @@
 	      int   sum   = 0;
 
 	      float time_sum=0.0f;
+              int fail_update_flag = 0;
 
 
 	    if (strcmp(algstr, "NIHT")==0) alg = 0;
@@ -838,12 +847,16 @@
 	    else if (strcmp(algstr, "er_naive")==0) alg = 16;
 	    else if (strcmp(algstr, "ssmp_naive")==0) alg = 17;
 	    else if (strcmp(algstr, "parallel_l0_swipe")==0) alg = 18;
-	    else if (strcmp(algstr, "robust_l0")==0) alg = 19;
-	    else if (strcmp(algstr, "deterministic_robust_l0")==0) alg = 20;
+	    else if (strcmp(algstr, "rand_robust_l0")==0) alg = 19;
+	    else if (strcmp(algstr, "robust_l0")==0) alg = 20;
 	    else if (strcmp(algstr, "ssmp_robust")==0) alg = 21;
-	    else if (strcmp(algstr, "adaptive_robust_l0")==0) alg = 22;
+	    else if (strcmp(algstr, "robust_l0_adaptive")==0) alg = 22;
+	    else if (strcmp(algstr, "robust_l0_adaptive_trans")==0) alg = 23;
+	    else if (strcmp(algstr, "robust_l0_trans")==0) alg = 24;
+	    else if (strcmp(algstr, "smp_robust")==0) alg = 25;
+	    else if (strcmp(algstr, "cgiht_robust")==0) alg = 26;
 
-
+      
       switch (alg) {
 	case 0:
 	   if (timingFlag == 0){
@@ -961,19 +974,36 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 		break;
 	case 19:
 		robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
-		SAFEcuda("ROBUST_L0_S_smv in gaga_smv");
+		SAFEcuda("RAND_ROBUST_L0_S_smv in gaga_smv");
 		break;
 	case 20:
-		deterministic_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
-		SAFEcuda("DETERMINISTIC_ROBUST_L0_S_smv in gaga_smv");
+		adaptive_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, 0, 0, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, &fail_update_flag);
+		//deterministic_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+		SAFEcuda("ROBUST_L0_S_smv in gaga_smv");
 		break;
 	case 21:
 		ssmp_robust(d_vec, d_y, resid, resid_update, d_rows, d_cols, d_vals, d_rm_rows_index, d_rm_cols, h_max_nonzero_rows_count, d_bin, d_bin_counters, h_bin_counters, residNorm_prev, tol, maxiter, num_bins, k, m, n, p, nz, noise_level, &iter, err, &sum, &time_sum, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, numBlocksr, threadsPerBlockr, timeRecord, resRecord);
 		SAFEcuda("SSMP_ROBUST_S_smv in gaga_smv");
 		break;
 	case 22:
-		adaptive_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
-		SAFEcuda("ADAPTIVE_ROBUST_L0_S_smv in gaga_smv");
+		adaptive_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, 0, 1, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, &fail_update_flag);
+		SAFEcuda("ROBUST_L0_ADAPTIVE_S_smv in gaga_smv");
+		break;
+	case 23:
+		adaptive_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, 1, 1, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, &fail_update_flag);
+		SAFEcuda("ROBUST_L0_ADAPTIVE_TRANS_S_smv in gaga_smv");
+		break;
+	case 24:
+		adaptive_robust_l0(d_vec, d_y, resid, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, num_bins, &sum, tol, maxiter, k, m, n, p, l0_thresh, nz, noise_level, 1, 0, resRecord, timeRecord, &iter, debug_mode, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, &fail_update_flag);
+		SAFEcuda("ROBUST_L0_TRANS_S_smv in gaga_smv");
+		break;
+	case 25:
+		smp_robust(d_vec, d_y, resid, resid_update, d_rows, d_cols, d_vals, d_bin, d_bin_counters, h_bin_counters, residNorm_prev, tol, maxiter, num_bins, k, m, n, p, nz, noise_level, &iter, err, &sum, &time_sum, numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin, timeRecord, resRecord);
+		SAFEcuda("SMP_S_smv in gaga_smv");
+		break;
+	case 26:
+		CGIHT_robust(d_vec, d_vec_thres, grad, grad_previous, grad_prev_thres, d_y, resid, resid_update, d_rows, d_cols, d_vals, d_bin, d_bin_counters, d_bin_grad, d_bin_counters_grad, h_bin_counters, residNorm_prev, tol, maxiter, num_bins, k, m, n, nz, noise_level, restartFlag, &iter, mu, err, &sum, &time_sum,  numBlocks, threadsPerBlock, numBlocksnp, threadsPerBlocknp, numBlocksm, threadsPerBlockm, numBlocks_bin, threadsPerBlock_bin);
+  		SAFEcuda("CGIHT_robust in gaga_smv");
 		break;
 	default:
 		printf("[gaga_smv] Error: The possible (case sensitive) input strings for algorithms using gaga_smv are:\n NIHT\n IHT\n HTP\n ThresholdSD\n ThresholdCG\n CSMPSP\n CGIHT\n");
@@ -1003,7 +1033,7 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 ***********************
 */
 
-    if ( (strcmp(algstr, "CGIHT")==0) && (restartFlag==1) ) {
+    if ( (strcmp(algstr, "CGIHT")==0 || strcmp(algstr, "cgiht_robust")==0) && (restartFlag==1) ) {
       strcat(algstr,"restarted");
     }
 
@@ -1017,7 +1047,7 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 	  results_smv(d_vec, d_vec_input, vecDistribution, residNorm_prev, h_norms, h_out, h_times, convergence_rate, total_iter, checkSupport, iter, timeIHT, time_sum, &sum, k, m, n, p, matrixEnsemble, seed,  p_startTest, p_stopTest, algstr, numBlocks, threadsPerBlock, band_percentage);
    	  SAFEcuda("results_smv in gaga_smv"); }
 	else if ( ((timingFlag == 0) || ((alg != 0) && (alg != 1)) ) && (noise_level > 0) ){
-	  results_smv_noise(d_vec, d_vec_input, vecDistribution, residNorm_prev, h_norms, h_out, h_times, convergence_rate, total_iter, checkSupport, iter, timeIHT, time_sum, &sum, k, m, n, p, matrixEnsemble, seed, noise_level, p_startTest, p_stopTest, algstr, numBlocks, threadsPerBlock, band_percentage);
+	  results_smv_noise(d_vec, d_vec_input, vecDistribution, residNorm_prev, h_norms, h_out, h_times, convergence_rate, total_iter, checkSupport, iter, timeIHT, time_sum, &sum, k, m, n, p, matrixEnsemble, seed, noise_level, p_startTest, p_stopTest, algstr, numBlocks, threadsPerBlock, band_percentage, fail_update_flag);
  	  SAFEcuda("results_smv_noise in gaga_smv"); }
 	else if ( (timingFlag == 1) && (alg == 0) ){
 	  results_timings_smv(d_vec, d_vec_input, vecDistribution, residNorm_prev, h_norms, h_out, h_times, convergence_rate, total_iter, checkSupport, iter, timeIHT, time_sum, time_per_iteration, time_supp_set, &sum, alpha_start, supp_flag, k, m, n, p, matrixEnsemble, seed,  p_startTest, p_stopTest, algstr, numBlocks, threadsPerBlock);
@@ -1091,7 +1121,7 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
       }
 
       SAFEcuda("2 cudaFree in gaga_smv");
-      if ( (alg == 5) || (alg == 6) ){
+      if ( (alg == 5) || (alg == 6) || (alg == 26)){
 	cudaFree(grad_previous);
       SAFEcuda("3.1 cudaFree in gaga_smv");
   	cudaFree(d_bin_grad);
@@ -1101,7 +1131,7 @@ tol, maxiter, num_bins, k, m, n, nz, &iter, mu, err, &sum, &time_sum, numBlocks,
 
 
       SAFEcuda("3 cudaFree in gaga_smv");
-      if (alg == 6 || alg == 9){
+      if (alg == 6 || alg == 9 || alg == 26){
         cudaFree(grad_prev_thres);
       }
 

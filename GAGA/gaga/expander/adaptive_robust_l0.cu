@@ -1,16 +1,20 @@
 
 /*
 **************************************************
-**						adaptive-robust-l0							
+**		adaptive-robust-l0							
 **  	Noise robust version to parallel_l0	
 **************************************************
 */
 
-inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, int alpha, const int nz, float noise_level, float *resRecord, float *timeRecord, int *p_iter, int debug_mode, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin){
+inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_rows, int *d_cols, float *d_vals, int *d_bin, int *d_bin_counters, int *h_bin_counters, const int num_bins, int *p_sum, float tol, const int maxiter, const int k, const int m, const int n, const int d, int alpha, const int nz, float noise_level, int boost_flag_opt, int adaptive_flag_opt, float *resRecord, float *timeRecord, int *p_iter, int debug_mode, dim3 numBlocks, dim3 threadsPerBlock, dim3 numBlocksnp, dim3 threadsPerBlocknp, dim3 numBlocksm, dim3 threadsPerBlockm, dim3 numBlocks_bin, dim3 threadsPerBlock_bin, int *p_fail_update_flag){
 
 	int iter = *p_iter;
 	int offset = 0;
 	timeRecord[0] = 0.0;
+
+	// Boost flag
+
+	cudaMemcpyToSymbol(boost_flag, &boost_flag_opt, sizeof(int));
 
 	// Noise constants
 
@@ -37,10 +41,10 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 	float * d_Ax;
 	cudaMalloc((void**)&d_Ax, m * sizeof(float));
 
-	int *d_vec_ind;
-	cudaMalloc((void**)&d_vec_ind, n * sizeof(int));
-	zero_vector_int<<<numBlocks, threadsPerBlock>>>(d_vec_ind, n);
-	thrust::device_ptr<int> thrust_vec_ind(d_vec_ind);
+	float *d_vec_ind;
+	cudaMalloc((void**)&d_vec_ind, n * sizeof(float));
+	zero_vector_float<<<numBlocks, threadsPerBlock>>>(d_vec_ind, n);
+	thrust::device_ptr<float> thrust_vec_ind(d_vec_ind);
 
 	// Residual
 	// Assume initial guess is zero
@@ -106,13 +110,51 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 
 	// Other variables for adaptive-robust-l0
 
-	int num_failed_attempts = 0;
-
-	float prob_thresh = 1;
 	int xhat_k = 0;
 	int k_target = k - xhat_k;
 
-	while( (iter < maxiter) & (!(norm_1_res - norm_1_res_mean <= tol*norm_1_res_sd)) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0) & (prob_thresh > 0.05) & (num_failed_attempts < d + 1) ){
+	// Get max probability
+	// In cuda_adaptive_robust_l0_score_and_update we first compute the probability of 
+	// a value in the residual being not zero.
+	// prob_not_zero(value) >= prob_thresh.
+	// If prob_thresh starts at 1, we might fail a number of times before making an update
+	// Hence, we find
+	// max_{value} prob_not_zero(value) = max_{value} ( 1 - prob_zero(value) ) 
+
+	float prob_thresh = 1;
+
+	/*
+	float *d_probs_nonzero;
+	cudaMalloc((void**)&d_probs_nonzero, m*sizeof(float));
+	get_probs_nonzero<<<numBlocksm, threadsPerBlockm>>>(d_probs_nonzero, d_res, d, k_target, m);
+
+	thrust::device_ptr<float> thrust_probs_nonzero(d_probs_nonzero);
+	prob_thresh = *(thrust::max_element(thrust_probs_nonzero, thrust_probs_nonzero+m));
+	cudaFree(d_probs_nonzero);
+	*/
+
+	float * d_prob_zero_at_zero;
+	cudaMalloc((void**)&d_prob_zero_at_zero, 1*sizeof(float));
+	compute_prob_zero_at_zero<<<numBlocks, threadsPerBlock>>>(d_prob_zero_at_zero, d, k_target, m);
+
+	prob_thresh = prob_thresh - 0.01;
+
+	// Select probability decrement 
+	float delta = ((float)m)/((float)n); 
+	float rho = ((float)k)/((float)m); 
+	float prob_decr = 0.0;
+	if (delta <= 0.05) prob_decr = 0.01;
+	else if (delta > 0.05){
+		if (boost_flag_opt == 1){
+			if (rho > 0 && rho <= 0.1) prob_decr = 0.05; 
+			else if (rho > 0.1 && rho <= 0.2) prob_decr = 0.075; 
+			else prob_decr = 0.10; 
+		}else{
+			prob_decr = 0.025;
+		} 
+	}
+
+	while( (iter < maxiter) & (!(norm_1_res - norm_1_res_mean <= tol*norm_1_res_sd)) & (norm_res < (100*norm_res_start)) & (residNorm_diff > 0.000001) & (isCycling == 0) & (prob_thresh > 0.0) ){
 
 		// time variables
 		cudaEvent_t start, stop;
@@ -127,7 +169,7 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 		
 		// Compute scores and update
 
-		cuda_adaptive_robust_l0_score_and_update<<<numBlocks, threadsPerBlock>>>(d_vec, alpha, d, k_target, m, n, d_res, d_rows, offset, prob_thresh);
+		cuda_adaptive_robust_l0_score_and_update<<<numBlocks, threadsPerBlock>>>(d_vec, alpha, d, k_target, m, n, d_res, d_rows, offset, prob_thresh, d_prob_zero_at_zero);
 
 		if (debug_mode == 1){
 			printf("k_target=%d, prob_thresh=%1.2f, alpha=%d\n", k_target, prob_thresh, alpha);
@@ -169,7 +211,7 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 			for (int i = 0; i < residNorm_length - 1; i++){
 				residNorm_prev[i] = residNorm_prev[i + 1];
 			}
-			residNorm_prev[residNorm_length - 1] = norm_res;
+			residNorm_prev[residNorm_length - 1] = norm_1_res;
 			for (int i = 0; i < residNorm_length - 1; i++){
 				residNorm_evolution[i] = residNorm_evolution[i + 1];
 			}
@@ -180,7 +222,7 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 			// Check works, but not in all cases. Need more precise check.
 			for (int i = 0; i < resCyclingLength - 1; i++)
 				resCycling[i] = resCycling[i + 1]; 
-			resCycling[resCyclingLength - 1] = norm_res;
+			resCycling[resCyclingLength - 1] = norm_1_res;
 			if (iter > resCyclingLength){
 				isCycling = 1;
 				for (int i = 3; i < resCyclingLength; i = i + 2)
@@ -192,26 +234,28 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 					isCycling = isCycling*(abs(resCycling[i] - resCycling[i-1]) <= 1e-10);
 			}
 
+
 			// END STOPPING CONDITIONS
 			// Get number of nonzeros in xhat
 
-			find_nonzeros<<<numBlocks, threadsPerBlock>>>(d_vec, d_vec_ind, n, d, k_target, m, prob_thresh);
-			cudaThreadSynchronize();
+			if (adaptive_flag_opt == 1){
+				find_nonzeros<<<numBlocks, threadsPerBlock>>>(d_vec, d_vec_ind, n, d, k_target, m, prob_thresh, d_prob_zero_at_zero);
+				cudaThreadSynchronize();
 
-			xhat_k = thrust::count(thrust_vec_ind, thrust_vec_ind+n, 1);
-			k_target = k - xhat_k;
-			if (k_target < 1)
-				k_target = 1;
+				//xhat_k = thrust::count(thrust_vec_ind, thrust_vec_ind+n, 1);
+				xhat_k = cublasSasum(n, d_vec_ind, 1);
+				k_target = k - xhat_k;
+				k_target = k_target > floor(0.01*m) ? k_target : floor(0.01*m);
+				compute_prob_zero_at_zero<<<numBlocks, threadsPerBlock>>>(d_prob_zero_at_zero, d, k_target, m);
+			}
 
-			num_failed_attempts = 0;
 
 		}else{
 
 			cudaMemcpy(d_vec_tmp, d_vec, sizeof(float)*n, cudaMemcpyDeviceToDevice);
 			cudaMemcpy(d_res_tmp, d_res, sizeof(float)*m, cudaMemcpyDeviceToDevice);
 
-			num_failed_attempts += 1;
-			prob_thresh -= 0.02;
+			prob_thresh -= prob_decr;
 
 		}
 
@@ -234,8 +278,7 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 				(norm_res < (100*norm_res_start)) & \
 				(residNorm_diff > 0.000001) & \
 				(isCycling == 0) & \
-				(prob_thresh > 0.05) & \
-				(num_failed_attempts < d - 1) );
+				(prob_thresh > 0.05) );
 			if (stopping_debug == 0){
 				printf("Iterations: %d\n", (iter < maxiter));
 				printf("converged: %d\n", (!(norm_1_res - norm_1_res_mean <= tol*norm_1_res_sd)));
@@ -243,22 +286,19 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 				printf("residNorm_diff: %d\n", (residNorm_diff > 0.000001) );
 				printf("isCycling: %d\n", (isCycling == 0) );
 				printf("prob_thresh: %d\n", (prob_thresh > 0.05));
-				printf("num_failed_attempts: %d\n", (num_failed_attempts < d-1));
 			}
 		}
 
 
 	}
 
+	// If norm_xhat == 0.0, then no updates were performed.
+	// We flag a fail
 	float norm_xhat = 0.0;
-	float big_float = 10000.0;
-	
 	norm_xhat = cublasSnrm2(n, d_vec, 1);
 
-	// If norm_xhat == 0.0, then no updates were performed.
-	// We increase the norm so that GAGA doesn't think it is a success (when n is large)
 	if (norm_xhat == 0.0){
-		cudaMemcpy(d_vec, &big_float, sizeof(float), cudaMemcpyHostToDevice);
+		*p_fail_update_flag = 1;
 	}
 
 	*p_iter = iter;
@@ -274,6 +314,8 @@ inline void adaptive_robust_l0(float *d_vec, float *d_y, float *d_res, int *d_ro
 	// tmp vectors
 	cudaFree(d_vec_tmp);
 	cudaFree(d_res_tmp);
+
+	cudaFree(d_prob_zero_at_zero);
 
 }
 

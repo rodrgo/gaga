@@ -101,8 +101,9 @@ using namespace std;
 #include "expander/robust_l0.cu"
 #include "expander/deterministic_robust_l0.cu"
 #include "expander/ssmp_robust.cu"
+#include "expander/smp_robust.cu"
 #include "expander/adaptive_robust_l0.cu"
-
+#include "expander/cgiht_robust.cu"
 
 #include "algorithms.cu"
 #include "algorithms_timings.cu"

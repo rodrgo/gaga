@@ -1,0 +1,27 @@
+% testGPUPartialSVD
+
+m = 1024;
+n = 1024;
+r = 50;
+ens = 1; % 1=Gaussian, 2 = Uniform as the distributions for the random data 
+         % which create mxr matrix A, and rxn matrix B, to form Mat=AB.
+
+timeCPU = 0;
+timeGPU = 0;
+tocGPU = 0;
+
+ticGPU = tic;
+[g_Mat, timeGPU] = gpuGenerateMatrix(m, n, r, ens);
+tocGPU=toc(ticGPU);
+
+ticCPU = tic;
+A=randn(m,r)/sqrt(m);
+B=randn(r,n)/sqrt(n);
+c_Mat = A*B;
+tocCPU=toc(ticCPU);
+
+timings = [tocCPU tocGPU timeGPU]
+
+break;
+[gU,gS,gV]=svds(g_Mat,r);
+[cU,cS,cV]=svds(c_Mat,r);

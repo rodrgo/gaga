@@ -1,0 +1,752 @@
+/* Copyright 2014 Jeffrey D. Blanchard and Jared Tanner
+ *   
+ * GPU Accelerated Greedy Algorithms for Matrix Completion
+ *
+ * Licensed under the GAGAMC License available at gaga4cs.org and included as GAGAMC_license.txt.
+ *
+ * In  order to use the GAGAMC library, or any of its constituent parts, a user must
+ * agree to abide by a set of conditions of use. The library is available at no cost 
+ * for ``Internal'' use. ``Internal'' use of the library is defined to be use of the 
+ * library by a person or institution for academic, educational, or research purposes 
+ * under the conditions in the included GAGA_license.txt. Any use of the library implies 
+ * that these conditions have been understood, and that the user agrees to abide by all 
+ * the listed conditions.
+ *     
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Any redistribution or derivatives of this software must contain this header in all files
+ * and include a copy of GAGAMC_license.txt.
+ */
+
+
+
+// ******************** Simple Host function calls *********
+
+
+/* **********************************************************
+**  Functions for writing testing data to text files    *****
+************************************************************ */
+
+void File_output_entry(FILE* foutput, int m, int n, int r, int p, float* errors, float* timings, int iter, float conv_rate, unsigned int seed, char* algstr){
+  fprintf(foutput,"%s_MC_S_entry output: ",algstr);
+  fprintf(foutput,"m %d, n %d, r %d, p %d ",m,n,r,p);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinfty %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"seed %u \n", seed);
+}
+
+
+
+
+// ************** SAFETY ERROR CHECK FUNCTIONS *************
+
+
+void check_malloc_int(int *pointer, const char *message)
+{
+  if ( pointer == NULL ) {
+	printf("Malloc failed for %s.\n", message);
+  }
+}
+
+void check_malloc_float(float *pointer, const char *message)
+{
+  if ( pointer == NULL ) {
+	printf("Malloc failed for %s.\n", message);
+  }
+}
+
+void check_malloc_double(double *pointer, const char *message)
+{
+  if ( pointer == NULL ) {
+	printf("Malloc failed for %s.\n", message);
+  }
+}
+  
+void check_cudaMalloc(const char *message)
+{
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+	fprintf(stderr, "Error: cudaMalloc failed for %s: %d\n", message, status);
+  }
+}
+
+void Check_CUDA_Error(const char *message)
+{
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+	fprintf(stderr, "Error: %s: %s\n", message, cudaGetErrorString(error) );
+	exit(-1);
+  }
+}
+
+void Check_CUBLAS_Error(const char *message)
+{
+  cublasStatus status = cublasGetError();
+  if (status != CUBLAS_STATUS_SUCCESS) {
+	fprintf (stderr, "Error: %s: %d\n", message, status);
+	exit(-1);
+  }
+}
+
+void Check_CURAND_Error(curandStatus_t curandCheck, const char *message)
+{
+  if (curandCheck != CURAND_STATUS_SUCCESS) {
+	fprintf (stderr, "Error: %s: %d\n", message, curandCheck);
+	exit(-1);
+  }
+}
+
+
+  
+void check_cudaMalloc2(cudaError_t status, const char *message)
+{
+  if (status != cudaSuccess) {
+	fprintf(stderr, "Error: cudaMalloc failed for %s: %d\n", message, status);
+  }
+}
+
+inline void SAFEcudaMalloc2(cudaError_t status, const char *message)
+{
+#ifdef SAFE
+check_cudaMalloc2(status, message);
+#endif
+}
+
+
+
+inline void SAFEcudaMalloc(const char *message)
+{
+#ifdef SAFE
+check_cudaMalloc(message);
+#endif
+}
+
+inline void SAFEcuda(const char *message)
+{ 
+#ifdef SAFE
+Check_CUDA_Error(message);
+#endif
+}
+
+inline void SAFEcublas(const char *message)
+{
+#ifdef SAFE
+Check_CUBLAS_Error(message);
+#endif
+}
+
+inline void SAFEcurand(curandStatus_t curandCheck, const char *message)
+{
+#ifdef SAFE
+Check_CURAND_Error(curandCheck, message);
+#endif
+}
+
+inline void SAFEmalloc_int(int * pointer, const char *message)
+{
+#ifdef SAFE
+check_malloc_int(pointer, message);
+#endif
+}
+
+inline void SAFEmalloc_float(float *pointer, const char *message)
+{
+#ifdef SAFE
+check_malloc_float(pointer, message);
+#endif
+}
+
+inline void SAFEmalloc_double(double *pointer, const char *message)
+{
+#ifdef SAFE
+check_malloc_double(pointer, message);
+#endif
+}
+
+
+
+// ***************** Misc. functions *************
+
+
+
+float max_list(float* list, const int N)
+{
+  int j=0;
+  float max=list[0];
+
+  for (j=1; j<N; j++){
+	if (list[j]>max) max = list[j];
+  }
+
+  return max;
+}
+
+
+
+
+
+
+
+
+
+// ************** Power Iteration Partial SVD ******************** //
+
+// PowerIter performs a single Power Iteration to be used in a partial svd
+void PowerIter(float *d_u, float *d_u_prev, float *d_v, float *d_s, float *d_A, float *err, const int m, const int n, cublasHandle_t handle)
+{
+  float scale=0.0f;
+	float zero = 0.0f;
+	float minus_one = -1.0f;
+	float one = 1.0f;
+
+//  cudaMemcpy(d_u_prev, d_u, sizeof(float)*m, cudaMemcpyDeviceToDevice);
+
+  cublasScopy(handle,m, d_u, 1, d_u_prev, 1);
+  SAFEcublas("cublasScopy in PowerIter");
+
+  cublasSgemv(handle, CUBLAS_OP_N, m, n, &one, d_A, m, d_v, 1, &zero, d_u, 1);    
+  SAFEcublas("cublasSgemv in PowerIter");
+
+  cublasSnrm2(handle, m, d_u, 1, &scale);
+  SAFEcublas("cublasSnrm2 in PowerIter");
+
+  scale = 1/scale;
+
+  cublasSscal(handle, m, &scale, d_u, 1);
+  SAFEcublas("cublasSscal in PowerIter");
+
+  cublasSgemv(handle, CUBLAS_OP_T, m, n, &one, d_A, m, d_u, 1, &zero, d_v, 1);    
+  SAFEcublas("cublasSgemv (2) in PowerIter");
+
+  cublasSnrm2(handle,n, d_v, 1, d_s);
+  SAFEcublas("cublasSnrm2 (2) in PowerIter");
+//printf("\n s=%f",*d_s);
+  scale = 1/(float)*d_s;
+
+  cublasSscal(handle,n, &scale, d_v, 1);
+  SAFEcublas("cublasSscal (2) in PowerIter");
+
+  cublasSaxpy(handle, m, &minus_one, d_u, 1, d_u_prev, 1);
+  SAFEcublas("cublasSaxpy in PowerIter");
+
+  cublasSnrm2(handle, m, d_u_prev, 1, err);
+  SAFEcublas("cublasSnrm2 (3) in PowerIter");
+
+  return;
+}
+
+
+// PartialSVD: this function determines the top-r SVD of a matrix via 
+// r applications of the power method.  The underlying matrix is altered and would
+// either need a copy saved or need to be reconstructed after the fact via oldMat = endMat + USV^T.
+void PartialSVD(float *d_U, float *d_S, float *d_V, float *d_Mat, float *d_u, float *d_u_prev, float *d_v, const int m, const int n, const int r, const int maxIter, const float Tol, curandGenerator_t gen, dim3 threadsPerBlockm, dim3 numBlocksm, cublasHandle_t handle)
+{ 
+
+//printf("Inside PartialSVD");
+  // create a variable to store the current singular value
+  float s=0.0f;
+
+  // create control variables
+  float err=Tol+1.0f;
+  int iter = 0;
+  int Ushift = 0, Vshift = 0, Sshift=0;
+
+  // initialize random d_v and zero d_u
+  curandStatus_t curandCheck;
+  curandCheck = curandGenerateUniform(gen,d_v,n);
+  SAFEcurand(curandCheck, "curandGenerateUniform (INIT) in  PartialSVD.");
+
+  zero_vector_float<<<numBlocksm,threadsPerBlockm>>>(d_u, n);
+  SAFEcuda("zeo_vector_float (INIT) in PartialSVD.");
+
+  // perform a loop to find each singular vector and singular value
+  for ( int i=0; i<r; i++){
+
+    // run the power iteration until convergence
+    while ( (err > Tol) && (iter < maxIter) ){
+
+      PowerIter(d_u, d_u_prev, d_v, &s, d_Mat, &err, m, n, handle);
+      SAFEcuda("PowerIter in PartialSVD.");
+
+      iter++;
+    } // end while loop on power iteration
+
+
+    // copy the singular vectors to appropriate columns of U and V, store singular value in S
+    cudaMemcpy(d_U+Ushift, d_u, m*sizeof(float), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_V+Vshift, d_v, n*sizeof(float), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_S+Sshift, &s, sizeof(float), cudaMemcpyHostToDevice);
+//    h_S[Sshift]=s;
+//    cudaMemcpy(d_S+Sshift, &s, sizeof(float), cudaMemcpyHostToDevice);
+
+    // update shift control to next colum
+    Ushift += m;
+    Vshift += n;
+    Sshift++;
+
+
+    // update the matrix A by removing the singular vectors and value found
+    // This cublas BLAS 2 function will perform MAT = MAT - s * u * v^T
+    s *= -1.0f;
+    cublasSger(handle, m, n, &s, d_u, 1, d_v, 1, d_Mat, m);
+
+    // for the power iteration, re-nitialize random d_v and zero d_u
+    if ( i < r-1 ){
+      curandCheck = curandGenerateUniform(gen,d_v,n);
+      SAFEcurand(curandCheck, "curandGenerateUniform (INIT) in  PartialSVD.");
+
+      zero_vector_float<<<numBlocksm,threadsPerBlockm>>>(d_u, n);
+      SAFEcuda("zeo_vector_float (INIT) in PartialSVD.");
+
+      s=0.0f;
+
+      //re-initialize the controls
+      err=Tol+1.0f;
+      iter = 0;
+    } // end if (i<r-1) 
+  } // end the for loop
+
+  return;
+} // end PartialSVD
+
+
+
+
+
+/* ********************* Multiplications *********************** */
+
+void USVt_product(float *d_Mat, float *d_U, float *d_S, float *d_V,  const int m, const int n, const int r, dim3 threadsPerBlocknr, dim3 numBlocksnr, cublasHandle_t handle)
+{
+/*
+This function performs the reconstruction of a matrix from the partial SVD, namely Mat = U*S*V^T.
+U is m x r, S is an r vector, V is n x r, and thus Mat is m x n.  The multiplication is performed as Mat = U*(S*V^T).
+*/
+  int nr = n * r;
+	float zero = 0.0f;
+	float one = 1.0f;
+
+  SVt_mult<<<numBlocksnr,threadsPerBlocknr>>>(d_V, d_S, n , nr);
+  SAFEcuda("SVt_mult in USVt_prod.");
+
+  cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, r, &one, d_U, m, d_V, n, &zero, d_Mat, m);
+  SAFEcublas("cublasSgemm in USVT_prod.");
+  
+  return;
+}
+
+
+void ColumnSpProj(float *d_Out, float *d_Mat, float *d_U, float *d_W,  const int m, const int n, const int r,cublasHandle_t handle)
+{
+/*
+This function performs a column space projection by projecting the m x n Matrix d_Mat onto the column
+space defined by the m x r matrix d_U.  The r x n matrix d_W is any pre-allocated, working memory space of size rn.
+The projection is defined as Out = U * U^T * Mat.  This is accomplished as 
+W=U^T * Mat followed by Out = U * W under the assumption that r < min (m,n).
+*/
+
+	float zero = 0.0f;
+	float one = 1.0f;
+  // W = U^T * Mat
+  cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, r, n, m, &one, d_U, m, d_Mat, m, &zero, d_W, r);
+  SAFEcublas("cublasSgemm in ColumnSpProj.");
+
+  // Mat = U * W = U * (U^T * Mat)
+  cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, r, &one, d_U, m, d_W, r, &zero, d_Out, m);
+  SAFEcublas("cublasSgemm in (2) ColumnSpProj.");
+
+  return;
+}
+
+
+
+
+/*  **** Subspace Restricted Iterations **** */
+
+void RestrictedSD_MC_S_entry(float *d_Mat, float *Grad, float *Grad_proj, float *d_Y, float *d_U, float *d_S, float *d_V, int *d_A, float *d_y, float *d_u, float *d_u_prev, float *d_v, float *residNorm_prev, const int m, const int n, const int r, const int p, const int mn, const int maxIter, const float Tol, curandGenerator_t gen, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlockm, dim3 numBlocksm, dim3 threadsPerBlocknr, dim3 numBlocksnr, dim3 threadsPerBlockmn, dim3 numBlocksmn, cublasHandle_t handle)
+{ 
+/*
+This function performs a single iteration of a subspace restricted steepest descent step.  The subspace restriction is to the rank r column space.  
+*/
+  float alpha=0;
+  float err=0;
+	float minus_one = -1.0f;
+
+  // form Grad = A^*(Y-A(MAT))
+  cublasScopy(handle, mn, d_Y, 1, Grad, 1);
+  SAFEcublas("cublasScopy in RestrictedSD_MC_S_entry.");
+
+  A_entry_mat(Grad_proj, d_Mat, d_A, mn, p, threadsPerBlockmn, numBlocksmn, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_mat in RestrictedSD_MC_S_entry.");
+
+  cublasSaxpy(handle, mn, &minus_one, Grad_proj, 1, Grad, 1);
+  SAFEcublas("cublasSaxpy (1) in RestrictedSD_MC_S_entry.");
+
+  // recording the convergence of the residual
+  for (int j = 0; j<15; j++) residNorm_prev[j] = residNorm_prev[j+1];
+  cublasSnrm2(handle, mn, Grad, 1, &err);
+  SAFEcublas("cublasSnrm2 (1) in RestrictedSD_MC_S_entry.");
+  residNorm_prev[15]=err;
+//printf("err = %f\t",err);
+  // Now project the gradient onto the column space defined by U and store in Grad_proj
+  ColumnSpProj(Grad_proj, Grad, d_U, d_V, m, n, r, handle);
+  SAFEcuda("ColumnSpProj in RestrictedSD_MC_S_entry.");
+
+  // Now compute the step size:
+  // compute the norm of A(Grad_proj) using err to store the value: we use the vector entry sensing
+  A_entry_vec(d_y, Grad_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec in RestrictedSD_MC_S_entry.");
+  cublasSnrm2(handle, p, d_y, 1, &err);
+  SAFEcublas("cublasSnrm2 (2nd) in RestrictedSD_S_gen");
+  // compute the norm of Grad_proj  
+  cublasSnrm2(handle,mn, Grad_proj, 1, &alpha);
+  SAFEcublas("cublasSnrm2 (3rd) in RestrictedSD_S_gen");
+//printf("alpha_num = %f and alpha_denom = %f",alpha, err);
+  // compute the step size as the ratio of the norms safeguarding against large step-size.
+  if (alpha < 1000 * err){
+    alpha = alpha / err;
+    alpha = alpha * alpha;
+  }
+  else
+    alpha = 1.0f;
+
+
+ // cout << "alpha = " << alpha << endl;
+//printf(" so that alpha = %f\n",alpha);
+  // Take the steepest descent step of size alpha in the direction of the gradient Grad
+  cublasSaxpy(handle, mn, &alpha, Grad, 1, d_Mat, 1);
+  SAFEcublas("cublasSaxpy (2) in RestrictedSD_MC_S_entry.");
+
+  // Form the rank r approximation via a partial svd and reconstruction
+  PartialSVD(d_U, d_S, d_V, d_Mat, d_u, d_u_prev, d_v, m, n, r, maxIter, Tol, gen, threadsPerBlockm, numBlocksm, handle);
+  SAFEcuda("PartialSVD in RestrictedSD_MC_S_entry.");
+
+  USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlocknr, numBlocksnr, handle);
+  SAFEcuda("USVt_product in RestrictedSD_MC_S_entry.");
+
+  return;
+}
+
+
+
+
+
+
+
+void UnrestrictedCG_MC_S_entry(float *d_Mat, float *Grad, float *Grad_proj, float *Grad_prev, float *Grad_prev_proj, float *d_Y, float *d_U, float *d_S, float *d_V, int *d_A, float *d_y, float *d_y_work, float *d_u, float *d_u_prev, float *d_v, float *residNorm_prev, const int m, const int n, const int r, const int p, const int mn, const int maxIter, const float Tol, curandGenerator_t gen, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlockm, dim3 numBlocksm, dim3 threadsPerBlocknr, dim3 numBlocksnr, dim3 threadsPerBlockmn, dim3 numBlocksmn, cublasHandle_t handle)
+{ 
+/*
+This function performs a single iteration of a subspace restricted steepest descent step.  The subspace restriction is to the rank r column space.  
+*/
+  float alpha, alpha_num, alpha_denom;
+  float beta, beta_num, beta_denom;
+  float err=0;
+
+	float minus_one = -1.0f;
+	float one = 1.0f;
+
+  // form Grad = A^*(Y-A(MAT))
+  A_entry_mat(Grad, d_Mat, d_A, mn, p, threadsPerBlockmn, numBlocksmn, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_mat in UnrestrictedCG_MC_S_entry.");
+
+  cublasSaxpy(handle, mn, &minus_one, d_Y, 1, Grad, 1);
+  SAFEcublas("cublasSaxpy (1) in UnrestrictedCG_MC_S_entry.");
+
+  cublasSscal(handle, mn, &minus_one, Grad, 1);
+  SAFEcublas("cublasSscal (1) in UnrestrictedCG_MC_S_entry.");
+
+  // recording the convergence of the residual
+  for (int j = 0; j<15; j++) residNorm_prev[j] = residNorm_prev[j+1];
+  cublasSnrm2(handle, mn, Grad, 1, &err);
+  SAFEcublas("cublasSnrm2 (1) in UnrestrictedCG_MC_S_entry.");
+  residNorm_prev[15]=err;
+
+  // Project the gradient onto the column space defined by U and store in Grad_proj
+  ColumnSpProj(Grad_proj, Grad, d_U, d_V, m, n, r, handle);
+  SAFEcuda("ColumnSpProj (1) in UnrestrictedCG_MC_S_entry.");
+
+  // Project the past search direction (Grad_prev) into the current column space (U) and store in Grad_prev_proj
+  ColumnSpProj(Grad_prev_proj, Grad_prev, d_U, d_V, m, n, r, handle);
+  SAFEcuda("ColumnSpProj (2) in UnrestrictedCG_MC_S_entry.");
+
+  // Compute the orthogonalization coefficient
+  A_entry_vec(d_y, Grad_prev_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec (1) in UnrestrictedCG_MC_S_entry.");
+  A_entry_vec(d_y_work, Grad_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec (2) in UnrestrictedCG_MC_S_entry.");
+  cublasSdot(handle, p, d_y_work, 1, d_y, 1, &beta_num);
+  beta_num = -1.0f*beta_num;
+  SAFEcuda("cublasSdot (1) in UnrestrictedCG_MC_S_entry.");
+  cublasSdot(handle, p, d_y, 1, d_y, 1, &beta_denom);
+  SAFEcuda("cublasSdot (2) in UnrestrictedCG_MC_S_entry.");
+  if ( abs(beta_num) < 1000*beta_denom )
+    beta = beta_num/beta_denom;
+  else
+    beta = 0.0f;
+
+  // compute the new search directon Grad_prev
+  cublasSscal(handle, mn, &beta, Grad_prev, 1);
+  SAFEcuda("cublasSscal (2) in UnrestrictedCG_MC_S_entry.");
+  cublasSaxpy(handle, mn, &one, Grad, 1, Grad_prev, 1);
+  SAFEcuda("cublasSaxpy (2) in UnrestrictedCG_MC_S_entry.");
+
+  // project the search direciton into the current subspace and store in Grad_prev_proj
+  ColumnSpProj(Grad_prev_proj, Grad_prev, d_U, d_V, m, n, r, handle);
+  SAFEcuda("ColumnSpProj (3) in UnrestrictedCG_MC_S_entry.");
+  
+
+  // Use Grad to store the entry sensed verstion of the projected search direction
+  A_entry_vec(d_y, Grad_prev_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec (3) in UnrestrictedCG_MC_S_entry.");
+//  A_entry_mat(Grad, Grad_prev_proj, d_A, mn, p, threadsPerBlockmn, numBlocksmn, threadsPerBlockp, numBlocksp);
+//  SAFEcuda("A_entry_mat (2) in UnrestrictedCG_MC_S_entry.");
+
+  // Compute the update step size
+  cublasSdot(handle, mn, Grad_prev_proj, 1, Grad_proj, 1, &alpha_num);
+  SAFEcublas("cubalsSdot (3) in UnrestrictedCG_MC_S_entry.");
+  cublasSdot(handle, p, d_y, 1, d_y, 1, &alpha_denom); //(mn, Grad, 1, Grad, 1);
+  SAFEcublas("cubalsSdot (4) in UnrestrictedCG_MC_S_entry.");
+  if ( alpha_num < 1000*alpha_denom )
+    alpha = alpha_num/alpha_denom;
+  else
+    alpha = 1.0f;
+
+  // Take the steepest descent step of size alpha in the direction of the gradient Grad
+  cublasSaxpy(handle, mn, &alpha, Grad_prev, 1, d_Mat, 1);
+  SAFEcublas("cublasSaxpy (2) in UnrestrictedCG_MC_S_entry.");
+
+  // Form the rank r approximation via a partial svd and reconstruction
+  PartialSVD(d_U, d_S, d_V, d_Mat, d_u, d_u_prev, d_v, m, n, r, maxIter, Tol, gen, threadsPerBlockm, numBlocksm, handle);
+  SAFEcuda("PartialSVD in UnrestrictedCG_MC_S_entry.");
+
+  USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlocknr, numBlocksnr, handle);
+  SAFEcuda("USVt_product in UnrestrictedCG_MC_S_entry.");
+
+//  cout << "alpha = " << alpha << "   beta = " << beta << endl;
+  return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ******************** Simple Host function calls *********
+
+
+/* **********************************************************
+**  Functions for writing testing data to text files    *****
+************************************************************ */
+/*
+void File_output(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, char* algstr){
+  fprintf(foutput,"%s_S_dct output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d ",k,m,n,vecDistribution);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u \n", seed);
+}
+
+
+
+
+void File_output_smv(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, char* algstr, int p, int matrixEnsemble){
+  fprintf(foutput,"%s_S_smv output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d nonzeros_per_column %d matrixEnsemble %d ",k,m,n,vecDistribution,p,matrixEnsemble);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u \n", seed);
+}
+
+
+
+void File_output_gen(FILE* foutput, int k, int m, int n, int matrixEnsemble, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, char* algstr){
+  fprintf(foutput,"%s_S_gen output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d matrixEnsemble %d ",k,m,n,vecDistribution,matrixEnsemble);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u \n", seed);
+}
+
+
+
+
+
+
+void File_output_timings(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, float* time_per_iteration, float* time_supp_set, char* algstr, float alpha, int supp_flag){
+  fprintf(foutput,"%s_S_dct output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d ",k,m,n,vecDistribution);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u ", seed);
+  fprintf(foutput,"alpha %0.7e ", alpha);
+  fprintf(foutput,"supp_flag %d \n", supp_flag);
+
+  for (int j=0; j<iter; j++){
+    fprintf(foutput,"iteration %d time_iteration %0.7e time_supp_set %0.7e\n",j,time_per_iteration[j],time_supp_set[j]);
+  }
+
+}
+
+
+
+
+
+void File_output_timings_smv(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, float* time_per_iteration, float* time_supp_set, char* algstr, float alpha, int supp_flag, int p, int matrixEnsemble){
+  fprintf(foutput,"%s_S_smv output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d ",k,m,n,vecDistribution);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u ", seed);
+  fprintf(foutput,"alpha %0.7e ", alpha);
+  fprintf(foutput,"supp_flag %d ", supp_flag);
+  fprintf(foutput,"NonzerosPerCol %d ", p);
+  fprintf(foutput,"matrixEnsemble %d \n", matrixEnsemble);
+
+  for (int j=0; j<iter; j++){
+    fprintf(foutput,"iteration %d time_iteration %0.7e time_supp_set %0.7e\n",j,time_per_iteration[j],time_supp_set[j]);
+  }
+
+}
+
+
+
+void File_output_timings_gen(FILE* foutput, int k, int m, int n, int matrixEnsemble, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, float* time_per_iteration, float* time_supp_set, char* algstr, float alpha, int supp_flag){
+  fprintf(foutput,"%s_S_gen output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d ",k,m,n,vecDistribution);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u ", seed);
+  fprintf(foutput,"alpha %0.7e ", alpha);
+  fprintf(foutput,"supp_flag %d ", supp_flag);
+  fprintf(foutput,"matrixEnsemble %d \n", matrixEnsemble);
+
+  for (int j=0; j<iter; j++){
+    fprintf(foutput,"iteration %d time_iteration %0.7e time_supp_set %0.7e\n",j,time_per_iteration[j],time_supp_set[j]);
+  }
+
+}
+
+
+void File_output_timings_HTP(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, float* time_per_iteration, float* time_supp_set, float* cg_per_iteration, float* time_for_cg, char* algstr, float alpha, int supp_flag){
+  fprintf(foutput,"%s_S_dct output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d ",k,m,n,vecDistribution);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u ", seed);
+  fprintf(foutput,"alpha %0.7e ", alpha);
+  fprintf(foutput,"supp_flag %d \n", supp_flag);
+
+  for (int j=0; j<iter; j++){
+    fprintf(foutput,"iteration %d time_iteration %0.7e time_supp_set %0.7e cg_per_iteration %0.0f time_for_cg %0.7e\n",j,time_per_iteration[j],time_supp_set[j],cg_per_iteration[j],time_for_cg[j]);
+  }
+
+}
+
+
+
+
+void File_output_timings_HTP_smv(FILE* foutput, int k, int m, int n, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, float* time_per_iteration, float* time_supp_set, float* cg_per_iteration, float* time_for_cg, char* algstr, float alpha, int supp_flag, int p, int matrixEnsemble){
+  fprintf(foutput,"%s_S_smv output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d ",k,m,n,vecDistribution);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u ", seed);
+  fprintf(foutput,"alpha %0.7e ", alpha);
+  fprintf(foutput,"supp_flag %d ", supp_flag);
+  fprintf(foutput,"NonzerosPerCol %d ", p);
+  fprintf(foutput,"matrixEnsemble %d \n", matrixEnsemble);
+
+  for (int j=0; j<iter; j++){
+    fprintf(foutput,"iteration %d time_iteration %0.7e time_supp_set %0.7e cg_per_iteration %0.0f time_for_cg %0.7e\n",j,time_per_iteration[j],time_supp_set[j],cg_per_iteration[j],time_for_cg[j]);
+  }
+
+}
+
+
+
+
+void File_output_timings_HTP_gen(FILE* foutput, int k, int m, int n, int matrixEnsemble, int vecDistribution, float* errors, float* timings, int iter, float conv_rate, int *supportCheck, unsigned int seed, float* time_per_iteration, float* time_supp_set, float* cg_per_iteration, float* time_for_cg, char* algstr, float alpha, int supp_flag){
+  fprintf(foutput,"%s_S_gen output: ",algstr);
+  fprintf(foutput,"k %d, m %d, n %d, vecDistribution %d ",k,m,n,vecDistribution);
+  fprintf(foutput,"errorl1 %0.7e errorl2 %0.7e errorlinf %0.7e ",errors[0],errors[1],errors[2]);
+  fprintf(foutput,"timeALG %0.7e timeIter %0.7e timeTotal %0.7e ",timings[0],timings[1],timings[2]);
+  fprintf(foutput,"iterations %d ",iter);
+  fprintf(foutput,"converge_rate %0.7e ", conv_rate);
+  fprintf(foutput,"TruePos %d FalsePos %d TrueNeg %d FalseNeg %d ", supportCheck[0], supportCheck[1], supportCheck[2], supportCheck[3]);
+  fprintf(foutput,"seed %u ", seed);
+  fprintf(foutput,"alpha %0.7e ", alpha);
+  fprintf(foutput,"supp_flag %d ", supp_flag);
+  fprintf(foutput,"matrixEnsemble %d \n", matrixEnsemble);
+
+  for (int j=0; j<iter; j++){
+    fprintf(foutput,"iteration %d time_iteration %0.7e time_supp_set %0.7e cg_per_iteration %0.0f time_for_cg %0.7e\n",j,time_per_iteration[j],time_supp_set[j],cg_per_iteration[j],time_for_cg[j]);
+  }
+
+}
+
+*/

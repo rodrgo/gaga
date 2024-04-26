@@ -1,0 +1,49 @@
+
+/* ************ The entryu sensing kernels used in the funcitons ************* */
+
+
+__global__ void entry_sense_mat(float *Y, const float *Mat, const int *A, const int p)
+{
+/* 
+This kernel performs an entry sensing of the matrix Mat and stores the results as a matrix.  
+It assumes the matrix Y is provided as a zero matrix and then writes the elements of Mat 
+in the positons stored in A to the same positions in Y. 
+*/
+  unsigned int xIndex = blockDim.x * blockIdx.x + threadIdx.x;
+  if ( xIndex < p ){
+    int id=A[xIndex];
+    Y[id]=Mat[id];
+  }
+}
+
+__global__ void entry_sense_vec(float *y, const float *Mat, const int *A, const int p)
+{
+/*
+This kernel performs an entry sensing of the matrix Mat and stores the results as a vector of length p.
+*/
+  unsigned int xIndex = blockDim.x * blockIdx.x + threadIdx.x;
+  if ( xIndex < p ){
+    y[xIndex]=Mat[A[xIndex]];
+  }
+}
+
+
+
+/* ************ The entry sensing functions ************* */
+
+inline void A_entry_mat(float *Y, const float *Mat, const int *A, const int mn, const int p, dim3 threadsPerBlockmn, dim3 numBlocksmn, dim3 threadsPerBlockp, dim3 numBlocksp)
+{
+ /* This function performs the full entry sensing of a matrix MAT and stores the results as a matrix of size(Mat).
+    In other words, the stored result is A*A(Mat) where A is an entry sensing operator.              */ 
+  zero_vector_float<<<numBlocksmn,threadsPerBlockmn>>>(Y,mn);
+  entry_sense_mat<<<numBlocksp,threadsPerBlockp>>>(Y,Mat,A,p);
+}
+
+inline void A_entry_vec(float *y, const float *Mat, const int *A, const int p, dim3 threadsPerBlockp, dim3 numBlocksp)
+{
+ /* This function performs the full entry sensing of a matrix MAT and stores the results as a vector of length p.  */ 
+  entry_sense_vec<<<numBlocksp,threadsPerBlockp>>>(y,Mat,A,p);
+	
+}
+
+

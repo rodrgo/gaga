@@ -1,0 +1,166 @@
+/* Copyright 2010-2013 Jeffrey D. Blanchard and Jared Tanner
+ *   
+ * GPU Accelerated Greedy Algorithms for Matrix Completion
+ *
+ * Licensed under the GAGA License available at gaga4cs.org and included as GAGAMC_license.txt.
+ *
+ * In  order to use the GAGA library, or any of its constituent parts, a user must
+ * agree to abide by a set of * conditions of use. The library is available at no cost 
+ * for ``Internal'' use. ``Internal'' use of the library * is defined to be use of the 
+ * library by a person or institution for academic, educational, or research purposes 
+ * under the conditions in the included GAGA_license.txt. Any use of the library implies 
+ * that these conditions have been understood, and that the user agrees to abide by all 
+ * the listed conditions.
+ *     
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Any redistribution or derivatives of this software must contain this header in all files
+ * and include a copy of GAGA_license.txt.
+ */
+
+
+
+
+/*
+***************************************
+** MAIN FUNCTION: createDataMatrix **
+***************************************
+*/
+
+void createDataMatrix(float *d_Mat, float *d_U, float *d_V, const int m, const int n, const int r, int ensemble, unsigned int *p_seed, curandGenerator_t gen)
+{
+
+// THE INPUTS ARE AS FOLLOWS:
+// m and n are the size of the matrix being created and r is its rank
+// d_Mat is the data matrix 
+// ensemble determines how the values in d_A should be drawn.
+// ensemble 1 is gaussian and 2 is random \pm 1.
+
+/*
+  cudaDeviceProp dp;
+  cudaGetDeviceProperties(&dp,0);
+//  unsigned int global_mem = dp.totalGlobalMem;
+  unsigned int max_threads_per_block = dp.maxThreadsPerBlock;
+*/
+/*
+  cudaEvent_t startHost, stopHost;
+  float hostTime;
+  cudaEventCreate(&startHost);
+  cudaEventCreate(&stopHost);
+  cudaEventRecord(startHost,0);
+*/
+
+  int mr, nr, L;
+  mr = m * r;   // size of random matrix needed
+  nr = n * r;   // size of random matrix needed
+  L = mr + nr;  // total number of random values needed.
+/*
+  float *d_rand;
+  cudaMalloc((void**)&d_rand, L * sizeof(float));
+  SAFEcudaMalloc("random in creatDataMatrix");
+*/
+
+/*
+  int threads_perblockL = min(L, max_threads_per_block);
+  dim3 threadsPerBlockL(threads_perblockL);
+  int num_blocksL = (int)ceil((float)L/(float)threads_perblockL);
+  dim3 numBlocksL(num_blocksL);
+*/
+  curandStatus_t curandCheck;
+
+  // curandGenerator_t gen;
+  curandCheck = curandCreateGenerator(&gen,CURAND_RNG_PSEUDO_DEFAULT);
+  SAFEcurand(curandCheck, "curandCreateGenerator in creatDataMatrix");
+  // note, CURAND_RNG_PSEUDO_DEFAULT selects the random number generator type
+  curandCheck = curandSetPseudoRandomGeneratorSeed(gen,*p_seed);
+  SAFEcurand(curandCheck, "curandSet...Seed in creatDataMatrix");
+
+
+  if( ensemble == 1 ){
+    // set L values to be gaussian
+   // curandCheck = curandGenerateNormal(gen,d_rand,L,0,1);
+   // SAFEcurand(curandCheck, "curandGenerateNormal in creatDataMatrix");
+   curandCheck = curandGenerateNormal(gen,d_U,mr,0,1);
+   SAFEcurand(curandCheck, "curandGenerateNormal in creatDataMatrix");
+   curandCheck = curandGenerateNormal(gen,d_V,nr,0,1);
+   SAFEcurand(curandCheck, "curandGenerateNormal in creatDataMatrix");
+  }
+  else if( ensemble == 2 ){   // I CURRENTLY DON'T KNOW WHAT TYPES OF ENSEMBLES WE MIGHT WANT OTHER THAN GAUSSIAN BUT LEFT THIS AS A TEMPLATE
+    // set L values to be uniform \pm 1   ALSO THIS IS CURRENTLY JUST A SET OF UNIFORM NUMBERS, NOT A SIGN PATTERN
+   // curandCheck = curandGenerateUniform(gen,d_rand,L);
+   curandCheck = curandGenerateUniform(gen,d_U,mr);
+   curandCheck = curandGenerateUniform(gen,d_V,nr);
+   // SAFEcurand(curandCheck, "curandGenerateUniform in creatDataMatrix");
+//   sign_pattern<<< numBlocksL, threadsPerBlockL >>>(d_rand,L);
+   SAFEcuda("sign_pattern in creatDataMatrix");
+}
+
+
+
+  // Scale the entries by m to create approximate unit l2-norm columns
+// I DON'T KNOW HOW WE WANT TO SCALE THESE FACTOR MATRICES, SO ......
+/*
+  float scale = sqrt((float)m);
+  scale = 1/scale;
+  cublasSscal(mr,scale,d_rand,1);
+  SAFEcublas("cublasSscal in creatDataMatrix");
+
+  scale = sqrt((float)n);
+  scale = 1/scale;
+  cublasSscal(nr,scale,d_rand+mr,1);
+  SAFEcublas("cublasSscal in creatDataMatrix (2)");
+*/
+  float scale = sqrt((float)m);
+  scale = 1/scale;
+  cublasSscal(mr,scale,d_U,1);
+  SAFEcublas("cublasSscal in creatDataMatrix");
+
+  scale = sqrt((float)n);
+  scale = 1/scale;
+  cublasSscal(nr,scale,d_V,1);
+  SAFEcublas("cublasSscal in creatDataMatrix (2)");
+
+//  zero_vector_float<<< >>>(d_Mat, mn)
+
+  cublasSgemm ('N', 'N', m, n, r, 1.0f, d_U, m, d_V, r, 0.0f, d_Mat, m);
+  SAFEcublas("cublasSgemm in createDataMatrix"); 
+/*
+cublasSgemm (char transa, char transb, int m, int n,
+int k, float alpha, const float *A, int lda,
+const float *B, int ldb, float beta,
+float *C, int ldc)
+*/
+
+
+  curandCheck = curandDestroyGenerator(gen);
+  SAFEcurand(curandCheck, "curandDestroyGenerator in creatDataMatrix");
+
+//  cudaFree(d_rand);
+/*
+ 
+  cudaThreadSynchronize();
+  cudaEventRecord(stopMatvec,0);
+  cudaEventSynchronize(stopMatvec);
+  cudaEventElapsedTime(&MatvecTime, startMatvec, stopMatvec);
+  cudaEventDestroy(startMatvec);
+  cudaEventDestroy(stopMatvec);
+
+  cudaThreadSynchronize();
+  cudaEventRecord(stopHost,0);
+  cudaEventSynchronize(stopHost);
+  cudaEventElapsedTime(&hostTime, startHost, stopHost);
+  cudaEventDestroy(startHost);
+  cudaEventDestroy(stopHost);
+
+  printf("The function createMeasurements_en takes %f ms of which %f is the Mat-vc .\n", hostTime, MatvecTime);
+
+*/
+
+}
+
+
+

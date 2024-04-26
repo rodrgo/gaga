@@ -1,0 +1,15 @@
+export GAGA     = /home/suic/Desktop/MCGAGA
+export MATLAB   = /scratch/matlab/2011b
+export CUDAHOME = /usr/local/cuda-6.0
+export GPUARCH  = sm_30   # for example: Fermi is sm_20 and Kepler is sm_30
+#export CUDAHOME = /usr/local/cuda-4.2
+
+CUDAMATLAB = $(GAGA)/CudaMATLAB
+export CULA_ROOT= /home/suic/cula
+
+#export PATH=$PATH:/usr/local/cuda-6.0/bin:/usr/local/cuda-6.0/lib64:/home/suic/cula/lib64
+#export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-6.0/lib64:/home/suic/cula/lib64
+
+
+
+

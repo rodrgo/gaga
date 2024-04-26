@@ -1,0 +1,103 @@
+/* Copyright 2014 Jeffrey D. Blanchard and Jared Tanner
+ *   
+ * GPU Accelerated Greedy Algorithms for Matrix Completion
+ *
+ * Licensed under the GAGAMC License available at gaga4cs.org and included as GAGAMC_license.txt.
+ *
+ * In  order to use the GAGAMC library, or any of its constituent parts, a user must
+ * agree to abide by a set of conditions of use. The library is available at no cost 
+ * for ``Internal'' use. ``Internal'' use of the library is defined to be use of the 
+ * library by a person or institution for academic, educational, or research purposes 
+ * under the conditions in the included GAGA_license.txt. Any use of the library implies 
+ * that these conditions have been understood, and that the user agrees to abide by all 
+ * the listed conditions.
+ *     
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Any redistribution or derivatives of this software must contain this header in all files
+ * and include a copy of GAGAMC_license.txt.
+ */
+
+
+
+
+inline void results_entry(float *d_Mat, float *Grad, float *h_Mat_input, float *h_Mat_out, float *residNorm_prev, float *h_norms, float *h_times, float *convergence_rate, int *total_iter, int *d_A, int *h_A_out, int iter, float timeALG, float time_sum, const int m, const int n, const int r, const int p, const int mn, const int convRateNum, unsigned int seed, cudaEvent_t *p_startTest, cudaEvent_t *p_stopTest, char* algstr, cublasHandle_t handle)
+{
+	float minus_one = -1.0f;
+  cudaMemcpy(h_Mat_out, d_Mat, sizeof(float)*mn, cudaMemcpyDeviceToHost);
+  cudaMemcpy(h_A_out, d_A, sizeof(int)*p, cudaMemcpyDeviceToHost);
+
+  total_iter[0] = iter;
+
+  float convRate, root;
+  int temp = min(iter, convRateNum);
+  root = 1/(float)temp;
+  temp=convRateNum-temp;
+  convRate = (residNorm_prev[convRateNum-1]/residNorm_prev[temp]);
+  convRate = pow(convRate, root);
+  convergence_rate[0]=convRate;
+
+
+  // formulate the norms by computing the matrix Mat_input - Mat which is stored here in Grad
+  cudaMemcpy(Grad, h_Mat_input, mn*sizeof(float), cudaMemcpyHostToDevice);
+  float norm2_mat_in;
+	cublasSnrm2(handle, mn, Grad, 1, &norm2_mat_in); // l2 norm of original matrix
+  float norm1_mat_in;
+	cublasSasum(handle, mn, Grad, 1, &norm1_mat_in); // l1 norm of original matrix
+  cublasSaxpy(handle, mn, &minus_one, d_Mat, 1, Grad, 1);
+  cublasSnrm2(handle, mn, Grad, 1, h_norms);
+	h_norms[0] = h_norms[0]/norm2_mat_in; // l2 norm
+	cublasSasum(handle,mn, Grad, 1,h_norms+1);
+  h_norms[1]=h_norms[1]/norm1_mat_in; // l1 norm
+  // use iter and root as locations for temporary storage in order to compute the l_infity norm    
+  cublasIsamax(handle, mn, Grad, 1, &temp);
+  cudaMemcpy(&root, Grad+temp -1, sizeof(float), cudaMemcpyDeviceToHost);  //suic: note that we need to take temp -1, as the index returned by cublasIsamax is based on 1-indexing
+  h_norms[2]=abs(root);  // l infinity norm
+
+
+  //  record the timings
+
+  cudaEvent_t startTest = *p_startTest;
+  cudaEvent_t stopTest = *p_stopTest;
+
+  float timeTest;
+  h_times[1] = timeALG;
+  h_times[2] = time_sum/(float)iter;
+  cudaThreadSynchronize();
+  cudaEventRecord(stopTest,0);
+  cudaEventSynchronize(stopTest);
+  cudaEventElapsedTime(&timeTest, startTest, stopTest);
+  cudaEventDestroy(startTest);
+  cudaEventDestroy(stopTest);
+  h_times[0] = timeTest;
+
+
+// write all data to the big file
+
+  FILE *foutput;
+
+  time_t rawtime;
+  time(&rawtime);
+  struct tm * time_format;
+  time_format = localtime(&rawtime);
+  char fname[80]; 
+  sprintf(fname,"gpu_data_MC_entry%d%02d%02d.txt",time_format->tm_year+1900,time_format->tm_mon+1,time_format->tm_mday);
+
+  foutput = fopen(fname, "a+");
+  if (foutput == NULL) {
+	printf("WARNING: Output file did not open!\n");
+  }
+  else {
+	File_output_entry(foutput, m, n, r, p, h_norms, h_times, iter, convRate, seed, algstr);
+  }
+  fclose(foutput);
+
+
+}
+
+
+

@@ -1,0 +1,172 @@
+/* Copyright 2010-2013 Jeffrey D. Blanchard and Jared Tanner
+ *   
+ * GPU Accelerated Greedy Algorithms for Compressed Sensing
+ *
+ * Licensed under the GAGA License available at gaga4cs.org and included as GAGA_license.txt.
+ *
+ * In  order to use the GAGA library, or any of its constituent parts, a user must
+ * agree to abide by a set of * conditions of use. The library is available at no cost 
+ * for ``Internal'' use. ``Internal'' use of the library * is defined to be use of the 
+ * library by a person or institution for academic, educational, or research purposes 
+ * under the conditions in the included GAGA_license.txt. Any use of the library implies 
+ * that these conditions have been understood, and that the user agrees to abide by all 
+ * the listed conditions.
+ *     
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Any redistribution or derivatives of this software must contain this header in all files
+ * and include a copy of GAGA_license.txt.
+ */
+
+
+
+#include "greedyheader.cu"
+
+
+/*
+*********** VERBOSE or SAFE ***************
+**     IF you want verbose or safe,      **
+**     change it in greedyheader.cu      **
+*******************************************
+*/
+
+
+
+
+// Host function
+void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
+{
+
+#ifdef VERBOSE
+ cout <<"This is gpuPartialSVD"<<endl;
+#endif
+
+  if ( (nlhs!=2) && (nrhs!=3) )
+    printf("[gpuPartialSVD] Error: This function takes six input arguments:\n Mat (the matrix), m (rows of Mat), n (#cols of Mat), r (# desired singular vectors/values), Tol (accuracy tolerance for power iteration), maxIter (maximum iterations per power iteration).\n  This function returns four output arguments:\n U (r left singular vectors), S (r singular values), V (r right singular vectors), Timings (total time with and without memory allocation/free.\n  Use as: [U,S,V,Timings]=gpuPartialSVD(Mat,m,n,r,Tol,maxIter);\n");
+  else {
+    // start timing of entire function
+    cudaEvent_t startTotalTime, stopTotalTime;
+    float timeTotal;
+    cudaEventCreate(&startTotalTime);
+    cudaEventCreate(&stopTotalTime);
+    cudaEventRecord(startTotalTime,0);
+
+    // possible inputs
+    float *h_U, *h_S, *h_V;
+    
+    // possible outputs
+    float *h_Mat, *h_timeOut;
+
+    // read input variables
+    h_U = (float*)mxGetData(prhs[0]);
+    h_S = (float*)mxGetData(prhs[1]);
+    h_V = (float*)mxGetData(prhs[2]);
+
+    // check input validity
+    int m = (int)mxGetM(prhs[0]);
+    int r_check = (int)mxGetN(prhs[0]);
+    int r = (int)mxGetM(prhs[1]);
+    int n = (int)mxGetM(prhs[2]);
+    int rr_check = (int)mxGetN(prhs[2]);
+    if ( ( r != r_check ) || ( r != rr_check ) || (rr_check != r_check) ){
+      printf("[gpuUSVt] Error: The r dimensions do not match.\n");
+    }
+
+    // create output variables
+    plhs[0] = mxCreateNumericMatrix(m, n, mxSINGLE_CLASS, mxREAL);
+    h_Mat = (float*) mxGetData(plhs[0]);
+
+    plhs[1] = mxCreateNumericMatrix(2, 1, mxSINGLE_CLASS, mxREAL);
+    h_timeOut = (float*) mxGetData(plhs[1]);
+
+    // create some additional dimension variables
+    int mr = m * r;
+    int nr = n * r;
+    int mn = m * n;
+
+    // create and allocate device variables
+    float *d_Mat, *d_U, *d_S, *d_V;
+
+    cudaMalloc((void**)&d_Mat, mn * sizeof(float));
+    SAFEcudaMalloc("d_vec");
+
+    cudaMalloc((void**)&d_U, mr * sizeof(float));
+    SAFEcudaMalloc("d_vec");
+
+    cudaMalloc((void**)&d_S, r * sizeof(float));
+    SAFEcudaMalloc("d_vec");
+
+    cudaMalloc((void**)&d_V, nr * sizeof(float));
+    SAFEcudaMalloc("d_vec");
+
+    // fill devcie varialbes with input data
+    cudaMemcpy(d_U, h_U, mr*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_S, h_S, r*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_V, h_V, nr*sizeof(float), cudaMemcpyHostToDevice);
+
+    // create control parameters and curand generator, initial cublas
+    cudaDeviceProp dp;
+    cudaGetDeviceProperties(&dp,0);
+    unsigned int max_threads_per_block = dp.maxThreadsPerBlock;
+    int threads_perblocknr = min(nr, max_threads_per_block);
+    dim3 threadsPerBlocknr(threads_perblocknr);
+    int num_blocksnr = (int)ceil((float)nr/(float)threads_perblocknr);
+    dim3 numBlocksnr(num_blocksnr);
+
+
+    cublasInit();
+    SAFEcublas("cublasInit");
+
+    // start timing of PSVD only
+    cudaEvent_t startPSVD, stopPSVD;
+    float timePSVD;
+    cudaEventCreate(&startPSVD);
+    cudaEventCreate(&stopPSVD);
+    cudaEventRecord(startPSVD,0);
+
+    // compute the triple matrix product U*S*V^t and store in Mat
+    USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlocknr, numBlocksnr);
+    SAFEcuda("USVt_product in initialization of NIHT_MC_S_entry.");
+
+    // copy results to host     
+    cudaMemcpy(h_Mat, d_Mat, mn*sizeof(float), cudaMemcpyDeviceToHost);
+
+    // record time for PSVD
+    cudaThreadSynchronize();
+    cudaEventRecord(stopPSVD,0);
+    cudaEventSynchronize(stopPSVD);
+    cudaEventElapsedTime(&timePSVD, startPSVD, stopPSVD);
+    cudaEventDestroy(startPSVD);
+    cudaEventDestroy(stopPSVD);
+
+    h_timeOut[1] = timePSVD;
+
+    // free device variables, shutcown cublas, destroy curand generator
+    cudaFree(d_Mat);
+    cudaFree(d_U);
+    cudaFree(d_V);
+    cudaFree(d_S);
+
+    cublasShutdown();
+    SAFEcublas("cublasShutdown");
+
+    // record total time
+    cudaThreadSynchronize();
+    cudaEventRecord(stopTotalTime,0);
+    cudaEventSynchronize(stopTotalTime);
+    cudaEventElapsedTime(&timeTotal, startTotalTime, stopTotalTime);
+    cudaEventDestroy(startTotalTime);
+    cudaEventDestroy(stopTotalTime);
+
+    h_timeOut[0] = timeTotal;
+
+  } // ends the else of if ((nlhs!=4 && (nrhs!=6)) else {
+  return;
+}
+
+
+

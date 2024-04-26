@@ -1,0 +1,356 @@
+// created by Chenshuai Sui for testing of matrix completion algorithms 2014
+
+
+#include<math.h>
+#include "cula.h"
+
+
+//Partial SVD based on simultaneous power iteration
+
+void PartialSVD_SPI(float *d_U, float *h_S, float *d_V, float *d_Mat, float *d_A, float *d_U_prev, float *h_S_prev,  float *d_R, const int m, const int n, const int r, const int maxIter, const float Tol)
+{ 
+
+//printf("Inside PartialSVD_SPI");
+
+  // create control variables
+  float err=Tol+1.0f;
+  float err_num;
+	float err_denom;
+  int iter = 0;
+
+  // Define iteration matrix d_A = d_Mat*dMat'
+  cublasSgemm('n', 't', m,m,n,1,d_Mat, m,d_Mat, m, 0, d_A,m);
+	SAFEcublas("d_A = d_Mat*dMat");
+
+  // d_U = A*d_U_prev;
+  cublasSgemm('n', 'n', m,r,m,1.0f,d_A, m,d_U_prev, m, 0.0f, d_U,m);
+  SAFEcublas("d_U = A*d_U_prev");
+
+  // run the power iteration until convergence
+   
+	culaStatus s;
+	s = culaInitialize();
+	if(s != culaNoError)
+	{
+	printf("%s\n", culaGetStatusString(s));
+	}
+  for (int i=0; i<r; i++){      
+    h_S_prev[i] = 0.0f;
+  }
+
+  
+  while ( (err > Tol) && (iter < maxIter) ){
+   
+      //QR factorization
+      s = culaDeviceSgeqrf(m,r,d_U, m, d_R);
+      if(s != culaNoError)
+	{
+	printf("%s\n", culaGetStatusString(s));
+	}
+      s = culaDeviceSorgqr(m,r,r, d_U, m, d_R);
+       if(s != culaNoError)
+	{
+	printf("%s\n", culaGetStatusString(s));
+	}
+
+      cublasScopy(m*r, d_U, 1, d_U_prev,1);
+			SAFEcublas("d_U_prev = d_U");
+      // d_U = A*d_U_prev;
+      cublasSgemm('n', 'n', m,r,m,1,d_A, m,d_U_prev, m, 0.0f, d_U,m);
+     	SAFEcublas("d_U = A*d_U_prev");
+      
+      for (int i=0; i<r; i++){
+				h_S[i] =cublasSdot(m, d_U+i*m, 1, d_U_prev+i*m, 1);
+				SAFEcublas("cublasSdot");
+      }
+      
+      //cublasSaxpy(r, -1.0f, d_S,1, d_S_prev, 1);
+      //err = cublasSnrm2(r, d_S_prev,1);
+      
+      err_num = 0.0f;
+			err_denom = 0.0f;
+      for (int i=0; i<r; i++){
+        err_num += (h_S[i] - h_S_prev[i])*(h_S[i] - h_S_prev[i]);
+				err_denom += h_S[i]*h_S[i];
+        h_S_prev[i] = h_S[i];
+      }
+      err = sqrt(err_num/err_denom);
+      
+      
+      //swap d_S with d_S_prev
+      //cublasScopy(r, d_S, 1, d_S_prev,1);
+      
+      iter++;
+   } // end while loop on power iteration
+
+	if (iter == maxIter) printf("SVD: Maximum number of iterations reached.\n");
+
+   for (int i=0; i<r; i++){
+	h_S[i] = sqrt(h_S[i]);
+	h_S_prev[i] = 1.0f/h_S[i];
+   }
+
+    cublasScopy(m*r, d_U_prev, 1, d_U,1);
+
+   // let d_U_prev = d_U_prev *d_S^(-1)
+   for (int i=0; i<r; i++){
+	cublasSscal(m, h_S_prev[i], d_U_prev + i*m, 1);
+	SAFEcublas("cublasSscal");
+   }
+   // Then d_V = M'*d_U_prev
+   cublasSgemm('t', 'n', n,r,m, 1, d_Mat, m, d_U_prev, m, 0.0f, d_V, n);
+	 SAFEcublas("d_V = M'*d_U_prev");
+
+	
+  culaShutdown();
+
+  return;
+} // end PartialSVD
+
+
+
+
+
+//=====================Subspace Restricted Iterations ===================================================
+
+void RestrictedSD_MC_S_entry_SPI(float *d_Mat, float *Grad, float *Grad_proj, float *d_Y, float *d_U, float *d_S, float *d_V, int *d_A, float *d_y, float *d_MM, float *d_U_prev, float *d_R, float *h_S, float *h_S_prev, float *residNorm_prev, const int m, const int n, const int r, const int p, const int mn, const int maxIter, const float Tol, curandGenerator_t gen, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlocknr, dim3 numBlocksnr, dim3 threadsPerBlockmn, dim3 numBlocksmn)
+{ 
+/*
+This function performs a single iteration of a subspace restricted steepest descent step.  The subspace restriction is to the rank r column space.  
+*/
+  float alpha=0;
+  float err=0;
+
+  // form Grad = A^*(Y-A(MAT))
+  cublasScopy(mn, d_Y, 1, Grad, 1);
+  SAFEcublas("cublasScopy in RestrictedSD_MC_S_entry.");
+
+  A_entry_mat(Grad_proj, d_Mat, d_A, mn, p, threadsPerBlockmn, numBlocksmn, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_mat in RestrictedSD_MC_S_entry.");
+
+  cublasSaxpy(mn, -1.0f, Grad_proj, 1, Grad, 1);
+  SAFEcublas("cublasSaxpy (1) in RestrictedSD_MC_S_entry.");
+
+  // recording the convergence of the residual
+  for (int j = 0; j<15; j++) residNorm_prev[j] = residNorm_prev[j+1];
+  err = cublasSnrm2(mn, Grad, 1);
+  SAFEcublas("cublasSnrm2 (1) in RestrictedSD_MC_S_entry.");
+  residNorm_prev[15]=err;
+//printf("err = %f\t",err);
+  // Now project the gradient onto the column space defined by U and store in Grad_proj
+  ColumnSpProj(Grad_proj, Grad, d_U, d_V, m, n, r);
+  SAFEcuda("ColumnSpProj in RestrictedSD_MC_S_entry.");
+
+  // Now compute the step size:
+  // compute the norm of A(Grad_proj) using err to store the value: we use the vector entry sensing
+  A_entry_vec(d_y, Grad_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec in RestrictedSD_MC_S_entry.");
+  err = cublasSnrm2(p, d_y, 1);
+  SAFEcublas("cublasSnrm2 (2nd) in RestrictedSD_S_gen");
+  // compute the norm of Grad_proj  
+  alpha = cublasSnrm2(mn, Grad_proj, 1);
+  SAFEcublas("cublasSnrm2 (3rd) in RestrictedSD_S_gen");
+//printf("alpha_num = %f and alpha_denom = %f",alpha, err);
+  // compute the step size as the ratio of the norms safeguarding against large step-size.
+  if (alpha < 1000 * err){
+    alpha = alpha / err;
+    alpha = alpha * alpha;
+  }
+  else
+    alpha = 1.0f;
+
+
+ // cout << "alpha = " << alpha << endl;
+//printf(" so that alpha = %f\n",alpha);
+  // Take the steepest descent step of size alpha in the direction of the gradient Grad
+  cublasSaxpy(mn, alpha, Grad, 1, d_Mat, 1);
+  SAFEcublas("cublasSaxpy (2) in RestrictedSD_MC_S_entry.");
+
+  //store d_U in d_U_prev (as initial guess for next iteration)
+  cublasScopy(m*r, d_U, 1, d_U_prev,1);
+
+  // Form the rank r approximation via a partial svd and reconstruction
+  PartialSVD_SPI(d_U, h_S, d_V, d_Mat, d_MM, d_U_prev, h_S_prev, d_R, m, n, r, maxIter, Tol);
+  SAFEcuda("PartialSVD_SPI in RestrictedSD_MC_S_entry_SPI.");
+
+  // Copy value for S from host to device, such that d_S can be utilized in USVt_product
+  cudaMemcpy(d_S, h_S, sizeof(float)*r, cudaMemcpyHostToDevice);
+
+  USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlocknr, numBlocksnr);
+  SAFEcuda("USVt_product in RestrictedSD_MC_S_entry.");
+
+  return;
+}
+
+
+
+//=====================Subspace Unrestricted Iterations ===================================================
+
+
+void UnrestrictedCG_MC_S_entry_SPI(float *d_Mat, float *Grad, float *Grad_proj, float *Grad_prev, float *Grad_prev_proj, float *d_Y, float *d_U, float *d_S, float *d_V, int *d_A, float *d_y, float *d_y_work, float *d_MM, float *d_U_prev, float *d_R, float *h_S, float *h_S_prev, float *residNorm_prev, const int m, const int n, const int r, const int p, const int mn, const int maxIter, const float Tol, curandGenerator_t gen, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlocknr, dim3 numBlocksnr, dim3 threadsPerBlockmn, dim3 numBlocksmn)
+{ 
+/*
+This function performs a single iteration of a subspace restricted steepest descent step.  The subspace restriction is to the rank r column space.  
+*/
+  float alpha, alpha_num, alpha_denom;
+  float beta, beta_num, beta_denom;
+  float err=0;
+
+  // form Grad = A^*(Y-A(MAT))
+  A_entry_mat(Grad, d_Mat, d_A, mn, p, threadsPerBlockmn, numBlocksmn, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_mat in UnrestrictedCG_MC_S_entry.");
+
+  cublasSaxpy(mn, -1.0f, d_Y, 1, Grad, 1);
+  SAFEcublas("cublasSaxpy (1) in UnrestrictedCG_MC_S_entry.");
+
+  cublasSscal(mn, -1.0f, Grad, 1);
+  SAFEcublas("cublasSscal (1) in UnrestrictedCG_MC_S_entry.");
+
+  // recording the convergence of the residual
+  for (int j = 0; j<15; j++) residNorm_prev[j] = residNorm_prev[j+1];
+  err = cublasSnrm2(mn, Grad, 1);
+  SAFEcublas("cublasSnrm2 (1) in UnrestrictedCG_MC_S_entry.");
+  residNorm_prev[15]=err;
+	//printf("residNormprev15 = %f \n", err);
+
+  // Project the gradient onto the column space defined by U and store in Grad_proj
+  ColumnSpProj(Grad_proj, Grad, d_U, d_V, m, n, r);
+  SAFEcuda("ColumnSpProj (1) in UnrestrictedCG_MC_S_entry.");
+
+  // Project the past search direction (Grad_prev) into the current column space (U) and store in Grad_prev_proj
+  ColumnSpProj(Grad_prev_proj, Grad_prev, d_U, d_V, m, n, r);
+  SAFEcuda("ColumnSpProj (2) in UnrestrictedCG_MC_S_entry.");
+
+  // Compute the orthogonalization coefficient
+  A_entry_vec(d_y, Grad_prev_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec (1) in UnrestrictedCG_MC_S_entry.");
+  A_entry_vec(d_y_work, Grad_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec (2) in UnrestrictedCG_MC_S_entry.");
+  beta_num = cublasSdot(p, d_y_work, 1, d_y, 1);
+  beta_num = -1.0f*beta_num;
+  SAFEcuda("cublasSdot (1) in UnrestrictedCG_MC_S_entry.");
+  beta_denom = cublasSdot(p, d_y, 1, d_y, 1);
+  SAFEcuda("cublasSdot (2) in UnrestrictedCG_MC_S_entry.");
+  if ( abs(beta_num) < 1000*beta_denom )
+    beta = beta_num/beta_denom;
+  else
+    beta = 0.0f;
+
+  // compute the new search directon Grad_prev
+  cublasSscal(mn, beta, Grad_prev, 1);
+  SAFEcuda("cublasSscal (2) in UnrestrictedCG_MC_S_entry.");
+  cublasSaxpy(mn, 1, Grad, 1, Grad_prev, 1);
+  SAFEcuda("cublasSaxpy (2) in UnrestrictedCG_MC_S_entry.");
+
+  // project the search direciton into the current subspace and store in Grad_prev_proj
+  ColumnSpProj(Grad_prev_proj, Grad_prev, d_U, d_V, m, n, r);
+  SAFEcuda("ColumnSpProj (3) in UnrestrictedCG_MC_S_entry.");
+  
+
+  // Use Grad to store the entry sensed verstion of the projected search direction
+  A_entry_vec(d_y, Grad_prev_proj, d_A, p, threadsPerBlockp, numBlocksp);
+  SAFEcuda("A_entry_vec (3) in UnrestrictedCG_MC_S_entry.");
+//  A_entry_mat(Grad, Grad_prev_proj, d_A, mn, p, threadsPerBlockmn, numBlocksmn, threadsPerBlockp, numBlocksp);
+//  SAFEcuda("A_entry_mat (2) in UnrestrictedCG_MC_S_entry.");
+
+  // Compute the update step size
+  alpha_num = cublasSdot(mn, Grad_prev_proj, 1, Grad_proj, 1);
+  SAFEcublas("cubalsSdot (3) in UnrestrictedCG_MC_S_entry.");
+  alpha_denom = cublasSdot(p, d_y, 1, d_y, 1); //(mn, Grad, 1, Grad, 1);
+  SAFEcublas("cubalsSdot (4) in UnrestrictedCG_MC_S_entry.");
+  if ( alpha_num < 1000*alpha_denom )
+    alpha = alpha_num/alpha_denom;
+  else
+    alpha = 1.0f;
+
+  // Take the steepest descent step of size alpha in the direction of the gradient Grad
+  cublasSaxpy(mn, alpha, Grad_prev, 1, d_Mat, 1);
+  SAFEcublas("cublasSaxpy (2) in UnrestrictedCG_MC_S_entry.");
+
+  //store d_U in d_U_prev (as initial guess for next iteration)
+  cublasScopy(m*r, d_U, 1, d_U_prev,1);
+
+  // Form the rank r approximation via a partial svd and reconstruction
+  PartialSVD_SPI(d_U, h_S, d_V, d_Mat, d_MM, d_U_prev, h_S_prev, d_R, m, n, r, maxIter, Tol);
+  SAFEcuda("PartialSVD in UnrestrictedCG_MC_S_entry.");
+
+  // Copy value for S from host to device, such that d_S can be utilized in USVt_product
+  cudaMemcpy(d_S, h_S, sizeof(float)*r, cudaMemcpyHostToDevice);
+
+  USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlocknr, numBlocksnr);
+  SAFEcuda("USVt_product in UnrestrictedCG_MC_S_entry.");
+
+//  cout << "alpha = " << alpha << "   beta = " << beta << endl;
+  return;
+}
+
+
+
+float normest(float *d_Mat, const int m, const int n, float tol){
+
+	int maxiter=100;
+	int iter = 0;
+	float e;
+	//float *p_e = &e;
+	float e0 = 0;
+	float normx;
+	
+	
+	//create vector of length m with entries all set to 1
+	float *h_ones = (float*)malloc(sizeof(float)*m);
+	for (int i=0; i<m; i++) h_ones[i] = 1;
+	float *d_ones;
+	cudaMalloc((void**)&d_ones, m * sizeof(float));
+  SAFEcudaMalloc("d_ones");
+	cudaMemcpy(d_ones, h_ones, sizeof(float)*m, cudaMemcpyHostToDevice);
+	free(h_ones);
+
+	//use d_x to calculate column sum
+	float *d_x;
+	cudaMalloc((void**)&d_x, n * sizeof(float));
+  SAFEcudaMalloc("d_x");
+
+	//Compute column sum of d_Mat, store in d_x
+	cublasSgemv('t',m,n,1,d_Mat, m, d_ones,1,0, d_x,1);
+	
+	e = cublasSnrm2(n, d_x, 1);
+
+	if (e == 0) return e;
+
+	// d_x = d_x/e
+	cublasSscal(n, 1.0/e, d_x,1);
+
+	while (fabs(e-e0)> tol*e){
+		e0 =e;
+		cublasSgemv('n', m,n,1, d_Mat, m, d_x, 1, 0, d_ones,1);
+		cublasSgemv('t', m,n,1, d_Mat, m, d_ones, 1, 0, d_x,1);
+		
+		normx = cublasSnrm2(n, d_x, 1);
+		e = normx/cublasSnrm2(m, d_ones,1);
+		cublasSscal(n, 1.0/normx, d_x,1);
+		iter++;
+
+		if (iter > maxiter){
+			printf("normest: not converged");
+			cudaFree(d_ones);
+			cudaFree(d_x);
+			break;
+		}
+	}
+
+	cudaFree(d_ones);
+	cudaFree(d_x);
+	return e;
+}
+
+
+
+	
+
+	
+
+
+
+
+
+

@@ -1,0 +1,212 @@
+/* Copyright 2010-2013 Jeffrey D. Blanchard and Jared Tanner
+ *   
+ * GPU Accelerated Greedy Algorithms for Compressed Sensing
+ *
+ * Licensed under the GAGA License available at gaga4cs.org and included as GAGA_license.txt.
+ *
+ * In  order to use the GAGA library, or any of its constituent parts, a user must
+ * agree to abide by a set of * conditions of use. The library is available at no cost 
+ * for ``Internal'' use. ``Internal'' use of the library * is defined to be use of the 
+ * library by a person or institution for academic, educational, or research purposes 
+ * under the conditions in the included GAGA_license.txt. Any use of the library implies 
+ * that these conditions have been understood, and that the user agrees to abide by all 
+ * the listed conditions.
+ *     
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Any redistribution or derivatives of this software must contain this header in all files
+ * and include a copy of GAGA_license.txt.
+ */
+
+
+/*
+**************************************************
+** createProblem Kernels **
+**************************************************
+*/
+
+// make a vector of length L filled iwth integers from 0 to L-1.
+__global__ void makeIndexset(int *vector, int L)
+{
+  unsigned int xIndex = blockDim.x * blockIdx.x + threadIdx.x;
+  if ( xIndex < L ) {
+    vector[xIndex]= (int)xIndex;
+  }
+}
+
+// Random selection of p integers from 0 to L-1
+__global__ void randSelectInts(int *indexSet, float *randValues, const int L, const int p)
+{
+  
+  unsigned int xIndex = blockDim.x * blockIdx.x + threadIdx.x;
+  if ( xIndex < p ) {
+      int k = (int)((L-1) * randValues[xIndex]);           //suic: Note that here must be L-1 due to 0-indexing
+      indexSet[k] = atomicExch(indexSet+xIndex,indexSet[k]);
+  }
+}
+
+
+
+/*
+****************************************
+** Working Function: createDataMatrix **
+****************************************
+*/
+// this function creates the intial m x n matrix with rank r that we want to sense and reconstruct
+
+
+void createDataMatrix(float *d_Mat, float *d_U, float *d_V, const int m, const int n, const int r, const int ensemble, unsigned int *p_seed, curandGenerator_t gen, cublasHandle_t handle)
+{
+
+
+  int mr, nr;
+  mr = m * r;   // size of random matrix needed
+  nr = n * r;   // size of random matrix needed
+  float one = 1.0f;
+	float zero = 0.0f;
+
+  curandStatus_t curandCheck;
+/*
+  // curandGenerator_t gen;
+  curandCheck = curandCreateGenerator(&gen,CURAND_RNG_PSEUDO_DEFAULT);
+  SAFEcurand(curandCheck, "curandCreateGenerator in creatDataMatrix");
+  // note, CURAND_RNG_PSEUDO_DEFAULT selects the random number generator type
+  curandCheck = curandSetPseudoRandomGeneratorSeed(gen,*p_seed);
+  SAFEcurand(curandCheck, "curandSet...Seed in creatDataMatrix");
+*/
+
+  if( ensemble == 1 ){
+    // set L values to be gaussian
+   curandCheck = curandGenerateNormal(gen,d_U,mr,0,1);
+   SAFEcurand(curandCheck, "curandGenerateNormal in creatDataMatrix");
+   curandCheck = curandGenerateNormal(gen,d_V,nr,0,1);
+   SAFEcurand(curandCheck, "curandGenerateNormal in creatDataMatrix");
+  }
+  else if( ensemble == 2 ){   // I CURRENTLY DON'T KNOW WHAT TYPES OF ENSEMBLES WE MIGHT WANT OTHER THAN GAUSSIAN BUT LEFT THIS AS A TEMPLATE
+    // set L values to be uniform \pm 1   ALSO THIS IS CURRENTLY JUST A SET OF UNIFORM NUMBERS, NOT A SIGN PATTERN
+   curandCheck = curandGenerateUniform(gen,d_U,mr);
+   SAFEcurand(curandCheck, "curandGenerateUniform(d_U) in creatDataMatrix");
+   curandCheck = curandGenerateUniform(gen,d_V,nr);
+   SAFEcurand(curandCheck, "curandGenerateUniform(d_V) in creatDataMatrix");
+}
+/*
+  float scale = sqrt((float)m);
+  scale = 1/scale;
+  cublasSscal(mr,scale,d_U,1);
+  SAFEcublas("cublasSscal in creatDataMatrix");
+
+  scale = sqrt((float)n);
+  scale = 1/scale;
+  cublasSscal(nr,scale,d_V,1);
+  SAFEcublas("cublasSscal in creatDataMatrix (2)");
+*/
+  cublasSgemm (handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, r, &one, d_U, m, d_V, r, &zero, d_Mat, m);
+  SAFEcublas("cublasSgemm in createDataMatrix"); 
+
+  return;
+
+}
+
+
+/*
+************************************************
+** Working FUNCTION: createMeasurements_entry **
+************************************************
+*/
+// this funciton takes the data matrix, forms a sensing operator of p indcies stored in d_A, and returns A, the entry measurements in matrix form d_Y, and the entry measurements in vector form d_y
+
+void createMeasurements_entry(float *d_Y, float *d_y, float *d_Mat, int *d_A, const int m, const int n, const int p, unsigned int *p_seed, curandGenerator_t gen, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlockmn, dim3 numBlocksmn)
+{
+
+  int mn = m * n;
+  curandStatus_t curandCheck;
+
+  // allocate and create a vector of integers from 0 to mn-1.
+  int *indexSet;
+  cudaMalloc((void**)&indexSet, mn * sizeof(int));
+  SAFEcudaMalloc("indexSet in createMeasurements_entry");
+
+  makeIndexset<<<numBlocksmn, threadsPerBlockmn>>>(indexSet, mn);
+  SAFEcuda("makeIndexSet in createMeasurements_entry");
+
+/*
+  // write p random floats to d_y (used here as temporary storage)
+  curandStatus_t curandCheck;
+  curandCheck = curandCreateGenerator(&gen,CURAND_RNG_PSEUDO_DEFAULT);
+  SAFEcurand(curandCheck, "curandCreateGenerator in createMeasurements_entry");
+  curandCheck = curandSetPseudoRandomGeneratorSeed(gen,*p_seed);
+  SAFEcurand(curandCheck, "curandSet...Seed in createMeasurements_entry");
+*/  
+  curandCheck = curandGenerateUniform(gen,d_y,p);
+  SAFEcurand(curandCheck, "curandGenerateUniform in createMeasurements_entry");
+
+  // use the random floats to rendomly select p of the integersfrom o to mn-1 stored in d_y
+  randSelectInts<<<numBlocksp, threadsPerBlockp>>>(indexSet, d_y, mn, p);
+	cudaDeviceSynchronize();
+  SAFEcuda("randSelectInts in createMeasurements_entry");
+	
+
+  // create the radom entry sensor d_A by copying the first p randomly selected values in indexSet to d_A
+  cudaMemcpy(d_A, indexSet, p*sizeof(int), cudaMemcpyDeviceToDevice);
+  SAFEcuda("cudaMemcy(d_A,d_y...) in createMeasurements_entry");
+
+  
+/*
+  int h_AA[5];
+  cudaMemcpy(h_AA,d_A+p-5,5*sizeof(int),cudaMemcpyDeviceToHost);
+  printf("\n");
+for (int i=0; i<5; i++) printf("A[%d] = %d\t",i,h_AA[4-i]);
+  cudaMemcpy(h_AA,indexSet+p-5,5*sizeof(int),cudaMemcpyDeviceToHost);
+  printf("\n");
+for (int i=0; i<5; i++) printf("A[%d] = %d\t",i,h_AA[4-i]);
+  printf("\n");
+*/
+  // create the measurements in matrix and vector formats
+  A_entry_mat(d_Y, d_Mat, d_A, mn, p, threadsPerBlockmn, numBlocksmn, threadsPerBlockp, numBlocksp);
+	cudaDeviceSynchronize();
+  SAFEcuda("A_entry_mat in createMeasurements_entry");
+
+  A_entry_vec(d_y, d_Mat, d_A, p, threadsPerBlockp, numBlocksp);
+	cudaDeviceSynchronize();
+  SAFEcuda("A_entry_vec in createMeasurements_entry");
+
+  cudaFree(indexSet);
+	SAFEcuda("cudaFree in createMeasurements_entry");
+
+  return;
+}
+
+
+
+/*
+****************************************
+** MAIN FUNCTION: createProblem_entry **
+****************************************
+*/
+// This is the main function which calls createDataMatrix and createMeasurements_entry
+// to form the problem.  It produces the entry sensor A, the initial data matrix d_Mat = h_Mat,
+// the initial measurements d_Y (matrix) and d_y (vector).
+
+
+void createProblem_entry(float *d_Mat, float *h_Mat_input, float *d_U, float *d_V, float *d_Y, float *d_y, int *d_A, const int m, const int n, const int r, const int p, const int ensemble, unsigned int *p_seed, curandGenerator_t gen, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlockmn, dim3 numBlocksmn,cublasHandle_t handle)
+{
+  int mn = m * n;
+
+  // create the initial rank r data matrix of size m x n
+  createDataMatrix(d_Mat, d_U, d_V, m, n, r, ensemble, p_seed, gen, handle);
+  SAFEcuda("createDataMatrix in createProblem_entry");
+
+  // create the initial p measurements of the data matrix
+  createMeasurements_entry(d_Y, d_y, d_Mat, d_A, m, n, p, p_seed, gen, threadsPerBlockp, numBlocksp, threadsPerBlockmn, numBlocksmn);
+  SAFEcuda("createMeasurements_entry in createProblem_entry");
+
+  // store the initial data matrix on the host
+  cudaMemcpy(h_Mat_input, d_Mat, mn*sizeof(float), cudaMemcpyDeviceToHost);
+  SAFEcuda("cudaMemcpy in createProblem_entry");
+
+  return;
+}

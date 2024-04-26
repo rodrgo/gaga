@@ -1,0 +1,683 @@
+// Chenshuai Sui August 2014
+
+/*
+*********************************************************************
+**                      NIHT_MC_S_entry                                 **
+**      Single Precision Normalized Iterative Hard Thresholding    **
+**                with general matrices                            **
+*********************************************************************
+*/
+
+inline void NIHT_MC_S_entry_SPI(float *d_Mat, float *Grad, float *Grad_proj, float *d_Y, float *d_U, float *d_S, float *d_V, int *d_A, float *d_y, float *d_MM, float *d_U_prev, float *d_R, float *h_S, float *h_S_prev, float *residNorm_prev, const int m, const int n, const int r, const int p, const int mn, const int maxiter, const float resid_tol, const int SVDmaxIter, const float SVDTol, curandGenerator_t SVDgen, int * p_iter, float * p_time_sum, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlocknr, dim3 numBlocksnr, dim3 threadsPerBlockmn, dim3 numBlocksmn,cublasHandle_t handle)
+{
+/*
+**********************
+**  Initialization  **
+**********************
+*/
+
+
+
+  float err;
+
+  int iter = *p_iter;
+	iter = 0;
+  float time_sum=*p_time_sum;
+
+  cublasSnrm2(handle, mn, d_Y, 1, &err);
+  SAFEcublas("cublasSnrm2 in NIHT_MC_S_entry initialization");
+
+  float err_start = err;
+
+  for (int j=0; j<16; j++) {
+	residNorm_prev[j]=0;
+	
+  }
+
+
+// Some stopping parameters
+  int fail = 0;
+  float root, convergenceRate;
+
+// **********************
+//  int cycleFlag = 1;
+// **********************
+
+
+#ifdef VERBOSE
+if (verb>3) {
+  printf("The initial residual error = %f\n",err);
+}
+#endif
+
+
+/*
+************************************************
+** Set the Initial Subspace and Approximation **
+************************************************
+*/
+
+/*
+  PartialSVD(d_U, d_S, d_V, d_Y, d_u, d_u_prev, d_v, m, n, r, SVDmaxIter, SVDTol, SVDgen, threadsPerBlockm, numBlocksm);
+  SAFEcuda("PartialSVD in initialization of NIHT_MC_S_entry.");
+
+  USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlocknr, numBlocksnr);
+  SAFEcuda("USVt_product in initialization of NIHT_MC_S_entry.");
+*/
+/*
+printf("err = %f and err_start = %f\n",err,err_start);
+printf("loop check %d%d%d%d%d\n",(err > resid_tol),(iter < maxiter),(err <(100*err_start)),(residNorm_diff > .01*resid_tol),(fail == 0));
+*/
+
+/* 
+********************************
+** Main Steepest Descent Loop **
+********************************
+*/
+
+  while ( (err > resid_tol*err_start) & (iter < maxiter) & (err < (100000*err_start))  & (fail == 0) ) 
+  {
+
+
+  cudaEvent_t start, stop;
+  float time;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start,0);
+
+
+  RestrictedSD_MC_S_entry_SPI(d_Mat, Grad, Grad_proj, d_Y, d_U, d_S, d_V, d_A, d_y, d_MM, d_U_prev, d_R, h_S, h_S_prev, residNorm_prev, m, n, r, p, mn, SVDmaxIter, SVDTol, SVDgen, threadsPerBlockp, numBlocksp, threadsPerBlocknr, numBlocksnr, threadsPerBlockmn, numBlocksmn, handle);
+  SAFEcuda("PartialSVD in initialization of NIHT_MC_S_entry.");
+
+//printf("In the while loop for iteration %d and err = %f before the update",iter,err);
+  err = residNorm_prev[15];
+//printf(" and err = %f after the update.",err);
+
+
+// **********************************
+/*
+  for (int j = 0; j<15; j++) {
+	if ( (residNorm_prev[15]==residNorm_prev[j]) && (iter > 4) ) {
+	  cycleFlag=0;
+        } // end if
+   } // end for
+*/
+// **********************************
+
+  if (iter>500){
+	root = 1/15.0f;
+  	convergenceRate = (residNorm_prev[15]/residNorm_prev[0]);
+  	convergenceRate = pow(convergenceRate, root);
+	if (convergenceRate > 0.9999f) fail = 1; 
+  } 
+
+
+  iter++;
+
+//  cout << "iter = " << iter << "   err = " << err << endl;
+  cudaThreadSynchronize();
+  cudaEventRecord(stop,0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&time, start, stop);
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+  time_sum = time_sum + time;
+
+
+//printf("loop check %d%d%d%d%d\n",(err > resid_tol),(iter < maxiter),(err <(100*err_start)),(residNorm_diff > .01*resid_tol),(fail == 0));
+  } // ends while loop
+
+
+//cout << "resid_tol = " << resid_tol << endl;
+
+//  printf("\n At the end of NIHT_MC we have iter = %d and time sum = %f\n", iter, time_sum);
+
+  *p_iter = iter;
+  *p_time_sum = time_sum;
+
+}
+
+
+
+
+
+/*
+*********************************************************************
+**                    CGIHT_MC_S_entry                             **
+**      Single Precision Normalized Iterative Hard Thresholding    **
+**                with general matrices                            **
+*********************************************************************
+*/
+
+inline void CGIHT_MC_S_entry_SPI(float *d_Mat, float *Grad, float *Grad_proj, float *Grad_prev, float *Grad_prev_proj, float *d_Y, float *d_U, float *d_S, float *d_V, int *d_A, float *d_y, float *d_y_work, float *d_MM, float *d_U_prev, float *d_R, float *h_S, float *h_S_prev, float *residNorm_prev, const int m, const int n, const int r, const int p, const int mn, const int maxiter, const float resid_tol, const int SVDmaxIter, const float SVDTol, curandGenerator_t SVDgen, int * p_iter, float * p_time_sum, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlocknr, dim3 numBlocksnr, dim3 threadsPerBlockmn, dim3 numBlocksmn, cublasHandle_t handle)
+{
+/*
+**********************
+**  Initialization  **
+**********************
+*/
+
+
+  float err;
+
+  int iter = *p_iter;
+	iter =0;
+  float time_sum=*p_time_sum;
+
+  cublasSnrm2(handle, mn, d_Y, 1, &err);
+  SAFEcublas("cublasSnrm2 in CGIHT_MC_S_entry initialization");
+	
+
+  float err_start = err;
+
+
+  for (int j=0; j<16; j++) {
+	residNorm_prev[j]=0;
+  }
+
+
+// Some stopping parameters
+  int fail = 0;
+  float root, convergenceRate;
+
+// **********************
+//  int cycleFlag = 1;
+// **********************
+
+
+//#ifdef VERBOSE
+//if (verb>3) {
+  //printf("The initial residual error = %f\n",err);
+//}
+//#endif
+
+
+/*
+************************************************
+** Set the Initial Subspace and Approximation **
+************************************************
+*/
+
+/*
+  PartialSVD(d_U, d_S, d_V, d_Y, d_u, d_u_prev, d_v, m, n, r, SVDmaxIter, SVDTol, SVDgen, threadsPerBlockm, numBlocksm);
+  SAFEcuda("PartialSVD in initialization of CGIHT_MC_S_entry.");
+
+  USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlocknr, numBlocksnr);
+  SAFEcuda("USVt_product in initialization of CGIHT_MC_S_entry.");
+*/
+
+/*
+************************************************
+** First iteration is a steepest descent step **
+************************************************
+*/
+
+//  cout << "iter = " << iter << "   err = " << err << endl;
+  // Run on step of steepest descent with the output for the search direction given in Grad_prev and Grad_prev_proj for use in CG iterations
+  RestrictedSD_MC_S_entry_SPI(d_Mat, Grad_prev, Grad_prev_proj, d_Y, d_U, d_S, d_V, d_A, d_y, d_MM, d_U_prev, d_R, h_S, h_S_prev, residNorm_prev, m, n, r, p, mn, SVDmaxIter, SVDTol, SVDgen, threadsPerBlockp, numBlocksp, threadsPerBlocknr, numBlocksnr, threadsPerBlockmn, numBlocksmn, handle);
+  SAFEcuda("RestrictedSD in first iteration of CGIHT_MC_S_entry.");
+
+  err = residNorm_prev[15];
+
+
+  iter++;
+
+		//printf("iteration: %i, error: %f \n", iter,err);
+
+
+/* 
+********************************
+** Main Steepest Descent Loop **
+********************************
+*/
+
+	//printf("TOL = %f, relres = %f \n", resid_tol, resid_tol*err_start);
+
+  while ( (err > resid_tol*err_start) & (iter < maxiter) & (err < (100000*err_start)) & (fail == 0) ) 
+  {
+
+
+  cudaEvent_t start, stop;
+  float time;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start,0);
+
+
+  UnrestrictedCG_MC_S_entry_SPI(d_Mat, Grad, Grad_proj, Grad_prev, Grad_prev_proj, d_Y, d_U, d_S, d_V, d_A, d_y, d_y_work, d_MM, d_U_prev, d_R, h_S, h_S_prev, residNorm_prev, m, n, r, p, mn, SVDmaxIter, SVDTol, SVDgen, threadsPerBlockp, numBlocksp, threadsPerBlocknr, numBlocksnr, threadsPerBlockmn, numBlocksmn, handle);
+  SAFEcuda("UnrestrictedCG in initialization of CGIHT_MC_S_entry.");
+
+
+  err = residNorm_prev[15];
+
+// **********************************
+/*
+  for (int j = 0; j<15; j++) {
+	if ( (residNorm_prev[15]==residNorm_prev[j]) && (iter > 4) ) {
+	  cycleFlag=0;
+        } // end if
+   } // end for
+*/
+// **********************************
+
+  if (iter>500){
+	root = 1/15.0f;
+  	convergenceRate = (residNorm_prev[15]/residNorm_prev[0]);
+  	convergenceRate = pow(convergenceRate, root);
+	if (convergenceRate > 0.9999f) fail = 1; 
+  }
+
+  iter++;
+	//printf("iteration: %i, error: %f \n", iter, err);
+
+
+
+  cudaThreadSynchronize();
+  cudaEventRecord(stop,0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&time, start, stop);
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+  time_sum = time_sum + time;
+
+
+  }
+
+
+// cout << "resid_tol = " << resid_tol << endl;
+  *p_iter = iter;
+  *p_time_sum = time_sum;
+
+}
+
+
+
+
+
+/*
+************************************************
+**              SVT_MC_S_entry                     **
+** Single Precision SVT with general matrices **
+************************************************
+*/
+
+
+inline void SVT_MC_S_entry_SPI(float *d_Mat, float *Grad, float *Grad_proj, float *d_Y, float *d_U, float *d_S, float *d_V, int *d_A, float *d_MM, float *d_U_prev, float *d_U_init, float *d_R, float *h_S, float *h_S_prev, float *residNorm_prev, const int m, const int n, int *p_r, const int p, const int mn, const int maxiter, const float resid_tol, const int SVDmaxIter, const float SVDTol, int * p_iter, float * p_time_sum, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlockmn, dim3 numBlocksmn, unsigned int max_threads_per_block, cublasHandle_t handle)
+{
+
+  int iter = 0;
+  float time_sum=*p_time_sum;
+  float err;
+	float alpha;
+	float minus_one = -1.0f;
+
+  cublasSnrm2(handle, mn, d_Y, 1, &err);
+  SAFEcublas("cublasSnrm2 in SVT_MC_S_entry_SPI initialization");
+
+  float err_start = err;
+
+
+  for (int j=0; j<16; j++) {
+		residNorm_prev[j]=0;
+  }
+
+// Some stopping parameters
+  int fail = 0;
+  float root, convergenceRate;
+
+	float delta = 1.2*(float) m*(float) n/(float) p;
+	float tau = 5.0*sqrt((float) m*(float) n);
+
+	int r = 0;
+	int s;
+	int s_incre =5;
+	int s_prev =0;
+
+	float normestY = normest(d_Y,m,n,0.01, handle);
+	float k0 = ceil(tau/(delta*normestY));
+	
+	cublasScopy(handle, mn,d_Y,1,Grad_proj,1);
+	alpha = k0*delta;
+	cublasSscal(handle, mn, &alpha, Grad_proj,1);
+
+	//printf("The initial residual error = %f\n",err);
+
+
+
+
+/*
+*******************
+** Main IST Loop **
+*******************
+*/
+
+	//printf("TOL = %f, relres = %f \n", resid_tol, resid_tol*err_start);
+
+  while ( (err > resid_tol*err_start) && (iter <= maxiter) && (err < (100000*err_start)) && (fail == 0) ) 
+  {
+
+
+  	cudaEvent_t start, stop;
+  	float time;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start,0);
+		
+		s = std::min(r+4, std::min(m, n));
+		//printf("s_start = %i; ", s);
+		int OK = 0;
+	
+		while (OK==0)
+		{
+			if (s_prev >= s)
+				cublasScopy(handle, m*s, d_U, 1, d_U_prev,1);
+			else {
+				cublasScopy(handle, m*s_prev, d_U,1,d_U_prev,1);
+				cublasScopy(handle, m*(s-s_prev), d_U_init+m*s_prev, 1, d_U_prev + m*s_prev,1);
+			}
+
+			PartialSVD_SPI(d_U, h_S, d_V, Grad_proj, d_MM, d_U_prev, h_S_prev, d_R, m,n,s,SVDmaxIter, SVDTol, handle);
+
+			OK = (h_S[s-1] <= tau || s==std::min(m,n));
+			s_prev = s;
+			
+			s = std::min(s+s_incre, std::min(m,n));
+		}
+		//printf("s_final = %i \n", s_prev);
+
+		r = 0;
+		for (int i=0; i<s_prev; i++){
+			//if( i < 6) printf("S(%i) = %f \n", i+1, h_S[i]);
+			if (h_S[i] > tau ) {
+				r++;
+				h_S[i] = h_S[i] - tau;
+			}
+			else h_S[i] = 0;
+		}
+		//printf("iteration %i, r = %i, ", iter,r);
+		
+
+		// Copy value for S from host to device, such that d_S can be utilized in USVt_product
+  	cudaMemcpy(d_S, h_S, sizeof(float)*r, cudaMemcpyHostToDevice);
+
+		//if(r==0) r =1;
+/*
+		int threads_perblocknr = min(n*r, max_threads_per_block);
+		dim3 threadsPerBlocknr(threads_perblocknr);
+    int num_blocksnr = (int)ceil((float)(n*r)/(float)threads_perblocknr);
+    dim3 numBlocksnr(num_blocksnr);
+*/
+
+		USVt_product(d_Mat, d_U, d_S, d_V, m, n, r, threadsPerBlockmn, numBlocksmn, handle);
+  	SAFEcuda("USVt_product in initialization of SVT_MC_S_entry.");
+		
+		A_entry_mat(Grad, d_Mat, d_A, mn, p, numBlocksmn, threadsPerBlockmn, numBlocksp, threadsPerBlockp);
+  	SAFEcuda("A_entry_mat in SVT_MC_S_entry loop");
+
+		cublasSaxpy(handle, mn, &minus_one, d_Y, 1, Grad, 1);
+  	SAFEcublas("Fist cublasSaxpy in SVT_MC_S_entry loop");
+
+		cublasSnrm2(handle, mn, Grad, 1, &err);
+  	SAFEcublas("cublasSnrm2 of Grad in SVT_MC_S_entry_SPI");
+		
+		alpha = -delta;
+		cublasSaxpy(handle, mn, &alpha, Grad, 1, Grad_proj, 1);
+  	SAFEcublas("Second cublasSaxpy in SVT_MC_S_entry loop");
+
+
+		// recording the convergence of the residual
+		for (int j = 0; j<15; j++) {
+		residNorm_prev[j] = residNorm_prev[j+1];
+		}
+		residNorm_prev[15]=err;
+
+		if (iter>=500){
+			root = 1/15.0f;
+			convergenceRate = (residNorm_prev[15]/residNorm_prev[0]);
+			convergenceRate = pow(convergenceRate, root);
+			if (convergenceRate > 0.9999f) fail = 1;
+		}
+
+		iter=iter +1;
+
+  
+		cudaThreadSynchronize();
+		cudaEventRecord(stop,0);
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&time, start, stop);
+		cudaEventDestroy(start);
+		cudaEventDestroy(stop);
+		time_sum = time_sum + time;
+
+
+  }
+
+  *p_iter = iter;
+  *p_time_sum = time_sum;
+	*p_r = r;
+
+}
+
+
+
+inline void LMaFit_MC_S_entry(float *d_Mat, float *Grad, float *d_Y, float *d_U, float *d_V, int *d_A, float *d_RR, float *d_U_prev, float *d_V_prev, float *Grad_prev, float *d_SS, float *d_R, float *residNorm_prev, const int m, const int n, const int r, const int p, const int mn, const int mr,const int nr, const int maxiter, const float resid_tol, curandGenerator_t gen, int * p_iter, float * p_time_sum, dim3 threadsPerBlockp, dim3 numBlocksp, dim3 threadsPerBlockmr, dim3 numBlocksmr, dim3 threadsPerBlocknr, dim3 numBlocksnr, dim3 threadsPerBlockmn, dim3 numBlocksmn, cublasHandle_t handle)
+{
+
+  int iter = 0;
+  float time_sum=*p_time_sum;
+  float err, ratio;
+
+  cublasSnrm2(handle, mn, d_Y, 1, &err);
+  SAFEcublas("cublasSnrm2 in LMaFit_MC_S_entry initialization");
+
+  float err_start = err;
+
+
+  for (int j=0; j<16; j++) {
+		residNorm_prev[j]=0;
+  }
+	residNorm_prev[15]=err;
+
+// Some stopping parameters
+  int fail = 0;
+  float root, convergenceRate;
+
+	float alf = 0.0f;
+	float increment =1.0f;
+
+	int temp_n, temp_m;
+	float one = 1.0f;
+	float zero = 0.0f;
+	float minus_one = -1.0f;
+	float alpha;
+
+	if (m>n){
+		temp_n = m;
+		temp_m = n;
+	
+		
+  	// d_SS = d_Y'
+		cublasSgeam(handle,CUBLAS_OP_T, CUBLAS_OP_N, temp_m, temp_n, &one, d_Y, m, &zero, d_SS, temp_m, d_SS, temp_m);
+		// d_Y = d_SS ( = d_Y')
+		cublasScopy(handle, mn, d_SS, 1, d_Y,1);
+		// Grad = d_SS ( = d_Y')
+		cublasScopy(handle, mn, d_SS, 1, Grad,1);
+
+		float *temp;
+		temp = d_U;
+		d_U = d_V;
+		d_V = temp;
+
+		temp = d_U_prev;
+		d_U_prev = d_V_prev;
+		d_V_prev = temp;
+
+		zero_vector_float<<<numBlocksnr,threadsPerBlocknr>>>(d_U,temp_m*r);
+		SAFEcuda("zero_vector in LMaFit_MC_S_entry");
+	}
+	else { 
+		temp_n = n; 
+		temp_m = m;
+
+		cublasScopy(handle, mn, d_Y, 1, d_SS,1);
+		cublasScopy(handle, mn, d_Y, 1, Grad,1);
+		
+		zero_vector_float<<<numBlocksmr,threadsPerBlockmr>>>(d_U,temp_m*r);
+		SAFEcuda("zero_vector in LMaFit_MC_S_entry");
+	}
+	
+
+	culaStatus s;
+	s = culaInitialize();
+	if(s != culaNoError){printf("%s\n", culaGetStatusString(s));}
+
+
+/*
+*******************
+** Main IST Loop **
+*******************
+*/
+
+
+  while ( (err > resid_tol*err_start) && (iter <= maxiter) && (err < (100000*err_start)) && (fail == 0) ) 
+  {
+
+		cudaEvent_t start, stop;
+  	float time;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+		cudaEventRecord(start,0);
+
+		cublasScopy(handle, temp_m*r, d_U, 1, d_U_prev,1);
+		cublasScopy(handle, temp_n*r, d_V, 1, d_V_prev,1);
+		cublasScopy(handle, mn, Grad, 1, Grad_prev,1);
+		
+		//d_RR = d_V_prev*d_V_prev';
+		cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, r,r,temp_n, &one, d_V_prev, r, d_V_prev, r, &zero, d_RR, r);
+		//d_U = d_U_prev*d_RR
+		cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, temp_m,r,r, &one, d_U_prev, temp_m, d_RR, r, &zero, d_U, temp_m);
+		//d_U = d_U+ Grad*d_V_prev';
+		cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, temp_m,r,temp_n, &one, d_SS, temp_m, d_V_prev, r, &one, d_U, temp_m);
+
+		//QR-factorization of d_U
+		s = culaDeviceSgeqrf(temp_m,r,d_U, temp_m, d_R);
+    if(s != culaNoError) { printf("%s\n", culaGetStatusString(s));}
+
+    s = culaDeviceSorgqr(temp_m,r,r, d_U, temp_m, d_R);
+    if(s != culaNoError) { printf("%s\n", culaGetStatusString(s));}
+		
+		//d_RR = d_U'*d_U_prev;
+		cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, r,r,temp_m, &one, d_U, temp_m, d_U_prev, temp_m, &zero, d_RR, r);
+		//d_V = d_RR*d_V_prev
+		cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, r,temp_n,r, &one, d_RR, r, d_V_prev, r, &zero, d_V, r);
+		//d_V = d_V+ d_U'*Grad;
+		cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, r, temp_n, temp_m, &one, d_U, temp_m, d_SS, temp_m, &one, d_V, r);
+
+
+		//d_Mat = d_U*d_V;
+		cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, temp_m, temp_n,r, &one, d_U, temp_m, d_V, r, &zero, d_Mat, temp_m);
+		
+		if (m > n) {
+			cublasSgeam(handle,CUBLAS_OP_T, CUBLAS_OP_N, temp_n, temp_m, &one, d_Mat, temp_m, &zero, d_SS, temp_n, d_SS, temp_n);
+			cublasScopy(handle, mn, d_SS, 1, d_Mat,1);
+			A_entry_mat(d_SS, d_Mat, d_A, mn, p, numBlocksmn, threadsPerBlockmn, numBlocksp, threadsPerBlockp);
+			cublasSgeam(handle,CUBLAS_OP_T, CUBLAS_OP_N, temp_m, temp_n, &one, d_SS, temp_n, &zero, Grad, temp_m, Grad, temp_m);
+		}
+		else {
+		A_entry_mat(Grad, d_Mat, d_A, mn, p, numBlocksmn, threadsPerBlockmn, numBlocksp, threadsPerBlockp);
+  	SAFEcuda("A_entry_mat in LMaFit_MC_S_entry loop");
+		}
+
+		cublasSaxpy(handle, mn, &minus_one, d_Y, 1, Grad, 1);
+  	SAFEcublas("Fist cublasSaxpy in LMaFit_MC_S_entry loop");
+
+		cublasSscal(handle, mn, &minus_one, Grad, 1);
+
+		cublasSnrm2(handle, mn, Grad, 1, &err);
+  	SAFEcublas("cublasSnrm2 of Grad in LMaFit_MC_S_entry loop");
+		
+		
+		ratio = err/residNorm_prev[15];
+
+		// recording the convergence of the residual
+		for (int j = 0; j<15; j++) {
+		residNorm_prev[j] = residNorm_prev[j+1];
+		}
+		residNorm_prev[15]=err;
+
+		if (ratio >=1.0) {
+			increment = max(0.1*alf, 0.1*increment);
+			cublasScopy(handle, temp_m*r, d_U_prev, 1, d_U,1);
+			cublasScopy(handle, temp_n*r, d_V_prev, 1, d_V,1);
+			cublasScopy(handle, mn, Grad_prev, 1, Grad,1);
+			alf = 0.0f;
+			residNorm_prev[15]=residNorm_prev[14];
+			
+		}
+		else if(ratio > 0.7){
+			increment = max(increment, 0.25*alf);
+			alf = alf + increment;
+		}
+		
+		//printf("iter = %i, err = %f, alf = %f. \n ", iter, err, alf);
+
+		if (iter>=500){
+			root = 1.0f/15.0f;
+			convergenceRate = (residNorm_prev[15]/residNorm_prev[0]);
+			convergenceRate = pow(convergenceRate, root);
+			if (convergenceRate > 0.9999f) fail = 1;
+		}
+
+		cublasScopy(handle, mn, Grad, 1, d_SS,1);
+		alpha = alf + 1.0f;
+		cublasSscal(handle, mn, &alpha, d_SS, 1);
+
+		iter=iter +1;
+
+  
+		cudaThreadSynchronize();
+		cudaEventRecord(stop,0);
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&time, start, stop);
+		cudaEventDestroy(start);
+		cudaEventDestroy(stop);
+		time_sum = time_sum + time;
+
+  }
+
+	if (m>n) {
+		// d_U_prev = d_U'
+		cublasSgeam(handle,CUBLAS_OP_T, CUBLAS_OP_N, r, temp_m, &one, d_U, temp_m, &zero, d_U_prev, r, d_U_prev, r);
+		// d_V_prev = d_V'
+		cublasSgeam(handle, CUBLAS_OP_T, CUBLAS_OP_N, temp_n, r, &one, d_V, r, &zero, d_V_prev, temp_n, d_V_prev, temp_n);
+
+		float *temp;
+		temp = d_U;
+		d_U = d_V_prev;  // d_U= d_V'
+		d_V_prev = temp;
+		
+		temp = d_V;
+		d_V = d_U_prev; // d_V = d_U'
+		d_U_prev = temp;
+
+		// d_Mat = d_U*d_V;
+		cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n,r, &one, d_U, m, d_V, r, &zero, d_Mat, m);
+
+	}
+
+  *p_iter = iter;
+  *p_time_sum = time_sum;
+	
+	culaShutdown();
+
+}
+
+
+
+
+
+
+
+
+
+
